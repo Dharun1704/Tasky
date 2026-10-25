@@ -11,7 +11,10 @@ internal sealed record AppWindow(IntPtr Hwnd, string Title, string ExePath, stri
     /// What windows are grouped by, and what a pin of this app matches. A window whose program can't
     /// be identified at all (a system process such as the UAC prompt) is grouped on its own.
     /// </summary>
-    public string GroupKey => Aumid ?? Shortcut ?? (ExePath.Length > 0 ? ExePath : WindowKeyPrefix + Hwnd.ToInt64());
+    public string GroupKey => KeyOverride ?? Aumid ?? Shortcut ?? (ExePath.Length > 0 ? ExePath : WindowKeyPrefix + Hwnd.ToInt64());
+
+    /// <summary>Set for windows grouped by something other than their app (the permission prompt).</summary>
+    public string? KeyOverride { get; init; }
 
     /// <summary>What to start for a new window: packaged apps through the Apps folder, games through their shortcut.</summary>
     public string LaunchPath => Aumid != null ? AppsFolder + Aumid : Shortcut ?? ExePath;
@@ -64,9 +67,16 @@ internal static class WindowEnumerator
         return list;
     }
 
+    /// <summary>consent.exe while a permission prompt is open (set by the dock from <see cref="ConsentWatcher"/>).</summary>
+    public static uint? ConsentPid { get; set; }
+
+    /// <summary>The one dock item that stands for the permission prompt, however Windows shows it.</summary>
+    public const string UacKey = "uac:consent";
+
     static AppWindow Identify(IntPtr h, uint pid)
     {
         var title = Native.GetText(h);
+        if (pid == ConsentPid) return new AppWindow(h, title, "", null) { KeyOverride = UacKey };
         var (path, aumid) = Process(pid);
 
         // Store apps are hosted by ApplicationFrameHost; the real app owns a child window.
@@ -172,7 +182,8 @@ internal static class WindowEnumerator
     /// shows only a taskbar button for it (a hidden window of consent.exe) until it's clicked.
     /// </summary>
     public static bool IsUac(AppWindow w) =>
-        w.ExePath.EndsWith(@"\consent.exe", StringComparison.OrdinalIgnoreCase)
+        w.KeyOverride == UacKey
+        || w.ExePath.EndsWith(@"\consent.exe", StringComparison.OrdinalIgnoreCase)
         || Native.GetClass(w.Hwnd).Contains("Secure UAP", StringComparison.OrdinalIgnoreCase);
 }
 

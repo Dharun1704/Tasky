@@ -797,9 +797,18 @@ public partial class MainWindow : Window
     /// changes); this keeps the clock and volume current and re-checks the app list every 5 seconds in
     /// case an event was missed. Nothing visual is updated while the dock is hidden.
     /// </summary>
+    uint? consentPid;
+
     void OnTick()
     {
         ticks++;
+        // A permission prompt opening or closing: checked every second whether or not the dock is visible.
+        var consent = ConsentWatcher.Find();
+        if (consent != consentPid)
+        {
+            consentPid = WindowEnumerator.ConsentPid = consent;
+            Refresh();
+        }
         bool visible = !autoHidden && !hiddenForFullscreen;
         if (visible)
         {
@@ -813,7 +822,8 @@ public partial class MainWindow : Window
         // Explorer sometimes brings its taskbar back (e.g. after display changes).
         if (settings.HideTaskbar && WindowsTaskbar.IsVisible) WindowsTaskbar.SetVisible(false);
 
-        bool fullscreen = IsFullscreenForeground();
+        // A permission prompt is the one thing worth interrupting a fullscreen game or video for.
+        bool fullscreen = IsFullscreenForeground() && consentPid == null;
         if (fullscreen != hiddenForFullscreen)
         {
             hiddenForFullscreen = fullscreen;
@@ -852,6 +862,15 @@ public partial class MainWindow : Window
         }
         foreach (var item in items)
             if (!item.IsPinned && groups.ContainsKey(item.Key) && used.Add(item.Key)) desired.Add(item);
+        // A permission prompt goes first among the running apps (so it can never end up in the overflow
+        // menu), even if Windows didn't show us any of its windows: consent.exe running is enough.
+        if (consentPid != null || groups.ContainsKey(WindowEnumerator.UacKey))
+        {
+            var uacWindows = groups.GetValueOrDefault(WindowEnumerator.UacKey) ?? new List<AppWindow>();
+            groups[WindowEnumerator.UacKey] = uacWindows;
+            if (used.Add(WindowEnumerator.UacKey))
+                desired.Insert(desired.Count(d => d.IsPinned), GetOrCreate(WindowEnumerator.UacKey, "", false, uacWindows));
+        }
         foreach (var key in groupOrder)
             if (used.Add(key)) desired.Add(GetOrCreate(key, groups[key][0].LaunchPath, false, groups[key]));
 
@@ -866,10 +885,11 @@ public partial class MainWindow : Window
                 else item.Windows.Add(w);
             }
             item.TopWindow = ws.Count > 0 ? ws[0].Hwnd : IntPtr.Zero;
-            item.IsRunning = ws.Count > 0;
+            bool isUac = item.Key == WindowEnumerator.UacKey || ws.Any(WindowEnumerator.IsUac);
+            item.IsRunning = ws.Count > 0 || isUac;
             item.IsActive = ws.Any(w => w.Hwnd == lastForeground);
             if (item.IsActive || !item.IsRunning) item.IsAttention = false;
-            else if (ws.Any(WindowEnumerator.IsUac)) item.IsAttention = true; // waiting for your permission
+            else if (isUac) item.IsAttention = true; // waiting for your permission
             if (item.Icon == null && ws.Count > 0) item.Icon = IconLoader.FromWindow(ws[0].Hwnd);
         }
 
@@ -894,7 +914,7 @@ public partial class MainWindow : Window
         if (!itemsByKey.TryGetValue(key, out var item))
         {
             var first = windows is { Count: > 0 } ? windows[0] : null;
-            if (first != null && WindowEnumerator.IsUac(first))
+            if (key == WindowEnumerator.UacKey || (first != null && WindowEnumerator.IsUac(first)))
             {
                 // The UAC prompt's program can't be read; show it the way the taskbar does.
                 item = new DockItem(key, "") { Name = "User Account Control", Size = BaseSize, Icon = IconLoader.Shield() };
@@ -1392,6 +1412,14 @@ public partial class MainWindow : Window
 
     void ActivateOrLaunch(DockItem item)
     {
+        // The permission prompt: bring up whichever of consent.exe's windows Windows is holding back.
+        if (item.Key == WindowEnumerator.UacKey && consentPid is { } consent)
+        {
+            var prompt = ConsentWatcher.Windows(consent).FirstOrDefault(h => Native.GetWindowTextLength(h) > 0);
+            if (prompt != IntPtr.Zero) Activate(prompt);
+            return;
+        }
+
         if (!item.IsRunning)
         {
             Launch(item);
