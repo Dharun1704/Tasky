@@ -11,7 +11,7 @@ internal sealed class WindowEvents : IDisposable
 {
     const uint EVENT_SYSTEM_FOREGROUND = 0x0003, EVENT_SYSTEM_MOVESIZEEND = 0x000B,
                EVENT_SYSTEM_MINIMIZESTART = 0x0016, EVENT_SYSTEM_MINIMIZEEND = 0x0017,
-               EVENT_OBJECT_DESTROY = 0x8001, EVENT_OBJECT_HIDE = 0x8003, // DESTROY..HIDE also covers SHOW (0x8002)
+               EVENT_OBJECT_DESTROY = 0x8001, EVENT_OBJECT_SHOW = 0x8002, EVENT_OBJECT_HIDE = 0x8003,
                EVENT_OBJECT_CLOAKED = 0x8017, EVENT_OBJECT_UNCLOAKED = 0x8018;
     const uint WINEVENT_OUTOFCONTEXT = 0x0;
     const int OBJID_WINDOW = 0, CHILDID_SELF = 0;
@@ -29,6 +29,8 @@ internal sealed class WindowEvents : IDisposable
     public event Action? WindowsChanged;
     /// <summary>A window moved, resized or changed focus: what overlaps the dock may differ.</summary>
     public event Action? LayoutChanged;
+    /// <summary>A top-level window was just shown (used to catch Explorer bringing its taskbar back).</summary>
+    public event Action<IntPtr>? WindowShown;
 
     public WindowEvents()
     {
@@ -38,7 +40,7 @@ internal sealed class WindowEvents : IDisposable
                      (EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND),
                      (EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZEEND),
                      (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND),
-                     (EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE),
+                     (EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE), // also covers EVENT_OBJECT_SHOW
                      (EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED),
                  })
         {
@@ -53,6 +55,7 @@ internal sealed class WindowEvents : IDisposable
         if (hwnd == IntPtr.Zero || idObject != OBJID_WINDOW || idChild != CHILDID_SELF) return;
         if (GetAncestor(hwnd, 2 /* GA_ROOT */) != hwnd) return;
 
+        if (evt == EVENT_OBJECT_SHOW) WindowShown?.Invoke(hwnd);
         LayoutChanged?.Invoke();
         if (evt is EVENT_SYSTEM_MOVESIZEEND) return;
         WindowsChanged?.Invoke();

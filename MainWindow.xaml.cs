@@ -130,6 +130,7 @@ public partial class MainWindow : Window
         windowEvents = new WindowEvents();
         windowEvents.LayoutChanged += () => overlapDirty = true;
         windowEvents.WindowsChanged += ScheduleRefresh;
+        windowEvents.WindowShown += OnWindowShown;
         // Network and power changes arrive as events; the status icons only poll the volume.
         System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += (_, _) => Dispatcher.InvokeAsync(() => statusDirty = true);
         System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged += (_, _) => Dispatcher.InvokeAsync(() => statusDirty = true);
@@ -242,6 +243,18 @@ public partial class MainWindow : Window
     }
 
     // ---- Windows taskbar & shutdown ---------------------------------------------------------
+
+    /// <summary>
+    /// Explorer sometimes shows its taskbar again when Start opens (Start belongs to it, and an
+    /// auto-hide taskbar reveals itself with Start). Hide it again the moment it's shown, rather than
+    /// on the next once-a-second check, so it at most blinks.
+    /// </summary>
+    void OnWindowShown(IntPtr window)
+    {
+        if (!settings.HideTaskbar || Native.GetClass(window) != "Shell_TrayWnd") return;
+        Native.GetWindowThreadProcessId(window, out uint pid);
+        if (pid != ownPid) WindowsTaskbar.SetVisible(false); // not our own tray window, which has the same class
+    }
 
     void ApplyTaskbar()
     {
