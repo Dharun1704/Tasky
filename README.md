@@ -123,19 +123,7 @@ Exit any running copy first: Tasky allows only one at a time, and a second copy 
 dotnet run -- --settings
 ```
 
-| File | What it does |
-| --- | --- |
-| `MainWindow.xaml(.cs)` | The dock: layout, magnification, auto-hide, clicks, drag to reorder, menus, tray UI |
-| `PreviewWindow.cs` | Live window previews (DWM thumbnails) |
-| `StatusMonitor.cs` | Wi-Fi, volume and battery state for the status icons |
-| `JumpList.cs` | Apps' recent documents |
-| `Theme.cs` | Dark and light colours |
-| `WindowEnumerator.cs` | Finds taskbar-worthy windows and groups them by app |
-| `IconLoader.cs` | High-quality app icons at every size the dock draws |
-| `BackdropWindow.cs` | The blur behind the dock |
-| `TrayHost.cs` | The system tray, via [ManagedShell](https://github.com/cairoshell/ManagedShell) |
-| `Shell.cs` | Reserving screen space, hiding the Windows taskbar, start with Windows, Start menu shortcut |
-| `SettingsWindow.xaml(.cs)` | The settings window |
+The **[developer guide](docs/DEVELOPER.md)** explains how Tasky works and walks through every file. It starts with a C# and WPF primer for C++ and Win32 developers.
 
 ## Licence
 

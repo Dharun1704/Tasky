@@ -101,7 +101,6 @@ internal static class Native
 
     public const uint ABM_NEW = 0, ABM_REMOVE = 1, ABM_QUERYPOS = 2, ABM_SETPOS = 3,
                       ABM_GETSTATE = 4, ABM_SETSTATE = 10;
-    public const uint ABE_BOTTOM = 3;
     public const int ABS_AUTOHIDE = 1, ABS_ALWAYSONTOP = 2;
     public const int ABN_POSCHANGED = 1;
 
@@ -330,17 +329,6 @@ internal static class Native
         catch { return null; }
         finally { Marshal.ReleaseComObject(store); }
     }
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct SYSTEM_POWER_STATUS
-    {
-        public byte ACLineStatus, BatteryFlag, BatteryLifePercent, SystemStatusFlag;
-        public uint BatteryLifeTime, BatteryFullLifeTime;
-    }
-    [DllImport("kernel32.dll")] static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS status);
-
-    public static bool HasBattery() =>
-        GetSystemPowerStatus(out var s) && (s.BatteryFlag & 128 /* no system battery */) == 0 && s.BatteryFlag != 255;
 
     public static void PressKeys(params byte[] keys)
     {

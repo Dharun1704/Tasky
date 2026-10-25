@@ -1,0 +1,11 @@
+# Windows project: keep source files in Windows line endings, whatever the editor saves.
+*.cs        text eol=crlf
+*.xaml      text eol=crlf
+*.csproj    text eol=crlf
+*.manifest  text eol=crlf
+*.md        text eol=crlf
+.gitignore  text eol=crlf
+.gitattributes text eol=crlf
+LICENSE     text eol=crlf
+
+*.png binary

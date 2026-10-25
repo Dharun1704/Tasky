@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Windows.Data;
 using ManagedShell.Interop;
 using ManagedShell.WindowsTray;

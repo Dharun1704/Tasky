@@ -14,7 +14,7 @@ internal sealed class Settings
     public double IconSpacing { get; set; } = 10;
     /// <summary>Corner radius of the dock, in DIPs (with blur, snapped to what Windows allows).</summary>
     public double CornerRadius { get; set; } = 18;
-    /// <summary>Gap between the dock and the bottom of the screen, in DIPs.</summary>
+    /// <summary>Gap between the dock and its screen edge, in DIPs.</summary>
     public double EdgeGap { get; set; } = 8;
     public double BackgroundOpacity { get; set; } = 0.70;
     /// <summary>Font size of the clock's time, in DIPs; the date is drawn a little smaller.</summary>
@@ -39,7 +39,7 @@ internal sealed class Settings
     public double AnimationSpeed { get; set; } = 1.0;
     /// <summary>Ctrl+Alt+D shows the dock (and hides it again in auto-hide mode).</summary>
     public bool ShowHotkey { get; set; } = true;
-    /// <summary>Identifiers of tray icons pinned to the dock; null means ManagedShell's defaults.</summary>
+    /// <summary>Tray icons pinned to the dock, in dock order: the icon's GUID, or "exe path:icon ID" (see TrayHost.PinKey).</summary>
     public List<string>? TrayPins { get; set; }
 
     // Crash recovery: lets the next launch put the Windows taskbar back the way it was.

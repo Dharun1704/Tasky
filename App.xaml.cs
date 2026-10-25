@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Media;
 using Microsoft.Win32;
 
@@ -6,6 +6,8 @@ namespace Tasky;
 
 public partial class App : Application
 {
+    // Never read, but held for the app's lifetime: while this process owns the mutex, a second Tasky
+    // finds it taken and exits. (A local variable could be collected and release it early.)
     Mutex? singleInstance;
     // Held directly: WPF clears Application.MainWindow when the window closes during shutdown,
     // before OnExit runs, which used to skip the cleanup that restores the Windows taskbar.
