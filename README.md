@@ -27,17 +27,29 @@ A floating dock for Windows 11. It sits at the bottom of the screen in place of 
 ## Requirements
 
 - **Windows 11.** Windows 10 isn't supported: the blur and the rounded corners need Windows 11.
-- **[.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)** (x64), unless you build Tasky yourself with the .NET 10 SDK.
+- **[.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)** (x64), to build Tasky. Or install it from a terminal:
+  ```bash
+  winget install Microsoft.DotNet.SDK.10
+  ```
 
 ## Install
 
-1. Download the latest ZIP from **Releases** and unzip it somewhere you'll keep it, for example `C:\Apps\Tasky`.
-2. Double-click **`Tasky.exe`**. The dock appears at the bottom of the screen.
-3. Optional: click the **gear** on the dock and turn on **Start with Windows**.
+Tasky is built from source.
+
+1. **Get the code:** clone the repository, or on GitHub click **Code → Download ZIP** and unzip it.
+   ```bash
+   git clone https://github.com/Dharun1704/Tasky.git
+   ```
+2. **Build it** from inside the downloaded folder (`Tasky`, or `Tasky-main` if you used the ZIP). This puts a ready-to-run copy in `publish`:
+   ```bash
+   dotnet publish -c Release -o publish
+   ```
+3. **Start it:** double-click **`publish\Tasky.exe`**. The dock appears at the bottom of the screen.
+4. Optional: click the **gear** on the dock and turn on **Start with Windows**.
 
 Settings, pins and an error log are kept in `%APPDATA%\Tasky`.
 
-**Updating:** exit Tasky, replace the files with the new version, start it again. Your settings stay in `%APPDATA%\Tasky`.
+**Updating:** exit Tasky (right-click the dock → **Exit Tasky**), get the new code (`git pull`, or download the ZIP again), run the same `dotnet publish` command, and start `publish\Tasky.exe`. Your settings stay in `%APPDATA%\Tasky`.
 
 ## Using Tasky
 
@@ -91,17 +103,17 @@ With blur on, Windows only allows square, 4 px or 8 px corners on the blurred ar
 
 ## For developers
 
-Tasky is C# / WPF on .NET 10.
+Tasky is C# / WPF on .NET 10. To build and run a debug copy while working on it:
 
 ```bash
 dotnet run
 ```
 
-```bash
-dotnet publish -c Release -o publish
-```
+Exit any running copy first: Tasky allows only one at a time, and a second copy just opens the running one's settings and quits. To open the settings window straight away:
 
-Start the published `publish\Tasky.exe` with `--settings` to open the settings window straight away.
+```bash
+dotnet run -- --settings
+```
 
 | File | What it does |
 | --- | --- |
