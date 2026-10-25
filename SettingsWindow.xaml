@@ -1,0 +1,195 @@
+﻿<Window x:Class="Tasky.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Tasky settings" Width="480" Height="720" MinHeight="400"
+        ResizeMode="CanResize" WindowStartupLocation="CenterScreen"
+        Background="#1C1C1C" Foreground="White" FontFamily="{StaticResource UiFont}" FontSize="13"
+        UseLayoutRounding="True">
+    <Window.Resources>
+        <!-- Windows 11-style overlay scrollbar: no arrows, a thin rounded thumb that widens on hover -->
+        <Style x:Key="ScrollPage" TargetType="RepeatButton">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border Background="Transparent"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ScrollBar">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Width" Value="12"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="Transparent">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageUpCommand" Style="{StaticResource ScrollPage}"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageDownCommand" Style="{StaticResource ScrollPage}"/>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb>
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border x:Name="Bar" Width="4" CornerRadius="2" Background="#66FFFFFF"
+                                                        HorizontalAlignment="Center"/>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Bar" Property="Width" Value="7"/>
+                                                        <Setter TargetName="Bar" Property="CornerRadius" Value="3.5"/>
+                                                        <Setter TargetName="Bar" Property="Background" Value="#99FFFFFF"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsDragging" Value="True">
+                                                        <Setter TargetName="Bar" Property="Width" Value="7"/>
+                                                        <Setter TargetName="Bar" Property="Background" Value="#B3FFFFFF"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="#262626"/>
+            <Setter Property="BorderBrush" Value="#14FFFFFF"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="18,14"/>
+            <Setter Property="Margin" Value="0,0,0,14"/>
+        </Style>
+        <Style x:Key="CardTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+        <Style x:Key="RowLabel" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,10,0,0"/>
+        </Style>
+        <Style x:Key="RowValue" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,10,0,0"/>
+            <Setter Property="Foreground" Value="#B3FFFFFF"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#8CFFFFFF"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,2,0,0"/>
+        </Style>
+    </Window.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="22,18,22,8">
+            <TextBlock Text="Dock settings" FontSize="22" FontWeight="SemiBold" Margin="2,0,0,14"/>
+
+            <!-- Size -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Size" Style="{StaticResource CardTitle}"/>
+
+                    <Grid>
+                        <TextBlock Text="Icon size" Style="{StaticResource RowLabel}"/>
+                        <TextBlock x:Name="IconSizeValue" Style="{StaticResource RowValue}"/>
+                    </Grid>
+                    <Slider x:Name="IconSize" Minimum="28" Maximum="80" SmallChange="2" LargeChange="8"
+                            TickFrequency="2" IsSnapToTickEnabled="True"/>
+
+                    <Grid>
+                        <TextBlock Text="Space between icons" Style="{StaticResource RowLabel}"/>
+                        <TextBlock x:Name="SpacingValue" Style="{StaticResource RowValue}"/>
+                    </Grid>
+                    <Slider x:Name="Spacing" Minimum="0" Maximum="24" TickFrequency="1" IsSnapToTickEnabled="True"/>
+
+                    <CheckBox x:Name="Magnify" Content="Magnify icons on hover" Style="{StaticResource ToggleSwitch}" Margin="0,14,0,0"/>
+                    <Grid>
+                        <TextBlock Text="Magnification" Style="{StaticResource RowLabel}"/>
+                        <TextBlock x:Name="MagnifyValue" Style="{StaticResource RowValue}"/>
+                    </Grid>
+                    <Slider x:Name="MagnifyScale" Minimum="1.1" Maximum="2.2" TickFrequency="0.05" IsSnapToTickEnabled="True"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Look -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Look" Style="{StaticResource CardTitle}"/>
+
+                    <Grid>
+                        <TextBlock Text="Corner roundness" Style="{StaticResource RowLabel}"/>
+                        <TextBlock x:Name="RoundnessValue" Style="{StaticResource RowValue}"/>
+                    </Grid>
+                    <Slider x:Name="Roundness" Minimum="0" Maximum="40" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                    <TextBlock x:Name="RoundnessHint" Style="{StaticResource Hint}"
+                               Text="With blur on, Windows can only round the dock by 0, 4 or 8 px. Turn blur off for any roundness."/>
+
+                    <Grid>
+                        <TextBlock Text="Background opacity" Style="{StaticResource RowLabel}"/>
+                        <TextBlock x:Name="OpacityValue" Style="{StaticResource RowValue}"/>
+                    </Grid>
+                    <Slider x:Name="BackgroundOpacity" Minimum="0" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True"/>
+
+                    <CheckBox x:Name="Blur" Content="Blur behind the dock" Style="{StaticResource ToggleSwitch}" Margin="0,14,0,0"/>
+
+                    <Grid>
+                        <TextBlock Text="Clock size" Style="{StaticResource RowLabel}"/>
+                        <TextBlock x:Name="ClockSizeValue" Style="{StaticResource RowValue}"/>
+                    </Grid>
+                    <Slider x:Name="ClockSize" Minimum="10" Maximum="22" TickFrequency="0.5" IsSnapToTickEnabled="True"/>
+
+                    <Grid>
+                        <TextBlock Text="Distance from screen edge" Style="{StaticResource RowLabel}"/>
+                        <TextBlock x:Name="GapValue" Style="{StaticResource RowValue}"/>
+                    </Grid>
+                    <Slider x:Name="EdgeGap" Minimum="0" Maximum="40" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Behavior -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Behavior" Style="{StaticResource CardTitle}"/>
+                    <RadioButton x:Name="ModeReserve" GroupName="Mode" Style="{StaticResource Choice}">
+                        <StackPanel>
+                            <TextBlock Text="Keep windows above the dock"/>
+                            <TextBlock Text="Maximized windows stop where the dock starts." Style="{StaticResource Hint}"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton x:Name="ModeAutoHide" GroupName="Mode" Style="{StaticResource Choice}">
+                        <StackPanel>
+                            <TextBlock Text="Hide when a window overlaps"/>
+                            <TextBlock Text="Push the mouse to the bottom edge, or press the Windows key, to bring it back."
+                                       Style="{StaticResource Hint}"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton x:Name="ModeAlways" GroupName="Mode" Style="{StaticResource Choice}">
+                        <StackPanel>
+                            <TextBlock Text="Always show over windows"/>
+                        </StackPanel>
+                    </RadioButton>
+
+                    <Rectangle Height="1" Fill="#14FFFFFF" Margin="0,10"/>
+                    <CheckBox x:Name="ShowTray" Content="Show tray icons" Style="{StaticResource ToggleSwitch}"/>
+                    <CheckBox x:Name="HideTaskbar" Content="Hide the Windows taskbar" Style="{StaticResource ToggleSwitch}"/>
+                    <CheckBox x:Name="AutoStart" Content="Start with Windows" Style="{StaticResource ToggleSwitch}"/>
+                </StackPanel>
+            </Border>
+
+            <Grid Margin="0,0,0,12">
+                <Button x:Name="Reset" Content="Reset look to defaults" Style="{StaticResource SubtleButton}"
+                        HorizontalAlignment="Left" Click="OnReset"/>
+                <Button Content="Done" Style="{StaticResource SubtleButton}" HorizontalAlignment="Right" Click="OnDone"/>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</Window>
