@@ -37,6 +37,46 @@ internal static class IconLoader
         return image;
     }
 
+    /// <summary>
+    /// A small icon (e.g. for a file in a menu), fetched at a standard size so it's crisp, and not
+    /// cached: menus show a handful at a time and they come and go.
+    /// </summary>
+    public static BitmapSource? Small(string path, int px = 32)
+    {
+        try
+        {
+            var iid = typeof(Native.IShellItemImageFactory).GUID;
+            Native.SHCreateItemFromParsingName(path, IntPtr.Zero, ref iid, out var factory);
+            try
+            {
+                var size = new Native.SIZE { cx = px, cy = px };
+                if (factory.GetImage(size, Native.SIIGBF_ICONONLY | Native.SIIGBF_BIGGERSIZEOK, out var hbm) != 0 || hbm == IntPtr.Zero) return null;
+                try
+                {
+                    var image = FromHBitmap(hbm);
+                    return image.PixelWidth > px * 2 ? Downscale(image, px) : image;
+                }
+                finally { Native.DeleteObject(hbm); }
+            }
+            finally { Marshal.ReleaseComObject(factory); }
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Drops every cached size of an app's icon, once the app has left the dock.</summary>
+    public static void Forget(string path)
+    {
+        Sources.Remove(path);
+        var lower = path.ToLowerInvariant();
+        foreach (var key in Cache.Keys.Where(k => k.Item1 == lower).ToList()) Cache.Remove(key);
+    }
+
+    /// <summary>Drops cached sizes outside what the dock can currently draw (after an icon-size change).</summary>
+    public static void Trim(int minPx, int maxPx)
+    {
+        foreach (var key in Cache.Keys.Where(k => k.Item2 < minPx || k.Item2 > maxPx).ToList()) Cache.Remove(key);
+    }
+
     static BitmapSource? Source(string path)
     {
         if (Sources.TryGetValue(path, out var cached)) return cached;

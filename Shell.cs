@@ -183,6 +183,47 @@ internal static class WindowsTaskbar
     }
 }
 
+/// <summary>A Tasky shortcut in the Start menu's program list.</summary>
+internal static class StartMenuShortcut
+{
+    static string LinkPath => System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Tasky.lnk");
+
+    public static bool Exists => System.IO.File.Exists(LinkPath);
+
+    public static void Create()
+    {
+        try
+        {
+            var type = Type.GetTypeFromProgID("WScript.Shell");
+            if (type == null) return;
+            dynamic shell = Activator.CreateInstance(type)!;
+            try
+            {
+                dynamic link = shell.CreateShortcut(LinkPath);
+                link.TargetPath = Environment.ProcessPath;
+                link.WorkingDirectory = System.IO.Path.GetDirectoryName(Environment.ProcessPath);
+                link.Description = "A floating dock for Windows 11";
+                link.Save();
+            }
+            finally { Marshal.FinalReleaseComObject(shell); }
+        }
+        catch (Exception ex) { Log.Error(ex, "creating Start menu shortcut"); }
+    }
+
+    public static void Remove()
+    {
+        try { System.IO.File.Delete(LinkPath); }
+        catch (Exception ex) { Log.Error(ex, "removing Start menu shortcut"); }
+    }
+
+    /// <summary>Re-points an existing shortcut at this exe after a move or a publish, like AutoStart.Repair.</summary>
+    public static void Repair()
+    {
+        if (Exists && !(Environment.ProcessPath ?? "").Contains(@"\bin\", StringComparison.OrdinalIgnoreCase)) Create();
+    }
+}
+
 internal static class AutoStart
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";

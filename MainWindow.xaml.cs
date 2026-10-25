@@ -42,7 +42,14 @@ public partial class MainWindow : Window
 
     /// <summary>A menu or the tray popup is showing. Read from their state, not counted from events,
     /// so a missed Closed event can never leave the dock stuck on screen.</summary>
-    bool MenuOpen => TrayPopup.IsOpen || activeMenu?.IsOpen == true;
+    bool MenuOpen => TrayPopup.IsOpen || activeMenu?.IsOpen == true || PreviewShown;
+
+    // ---- Window previews ----
+    PreviewWindow? previews;
+    DockItem? previewItem;
+    readonly DispatcherTimer previewShow = new() { Interval = TimeSpan.FromMilliseconds(450) };
+    readonly DispatcherTimer previewHide = new() { Interval = TimeSpan.FromMilliseconds(300) };
+    bool PreviewShown => previews?.IsVisible == true;
     Native.RECT pillRect; // where the pill sits on screen when shown, in pixels
 
     double BaseSize => settings.IconSize;
@@ -56,10 +63,21 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        Theme.Apply(settings.Theme);
         InitializeComponent();
         tray = new TrayHost(settings);
         Apps.ItemsSource = items;
         tick.Tick += (_, _) => OnTick();
+        previewShow.Tick += (_, _) =>
+        {
+            previewShow.Stop();
+            if (hovered is { IsRunning: true } item) ShowPreview(item);
+        };
+        previewHide.Tick += (_, _) =>
+        {
+            previewHide.Stop();
+            if (previews?.IsMouseOver != true && hovered == null) HidePreview();
+        };
         autoHideTimer.Tick += (_, _) => UpdateAutoHide();
         refreshSoon.Tick += (_, _) => { refreshSoon.Stop(); Refresh(); };
         SourceInitialized += OnSourceInitialized;
@@ -84,6 +102,7 @@ public partial class MainWindow : Window
         appBar = new AppBar(appBarMsg);
         HwndSource.FromHwnd(hwnd).AddHook(WndProc);
         Native.RegisterShellHookWindow(hwnd);
+        ApplyHotkeySetting();
 
         try
         {
@@ -92,6 +111,7 @@ public partial class MainWindow : Window
             ApplyTray();
             Refresh();
             UpdateClock();
+            UpdateStatus();
         }
         catch (Exception error) { Log.Error(error, "startup"); }
         tick.Start();
@@ -116,6 +136,15 @@ public partial class MainWindow : Window
             appBar?.Forget();
             Dispatcher.InvokeAsync(() => { ApplyTaskbar(); Reposition(); });
         }
+        else if (m == WM_HOTKEY && (int)wParam == HotkeyId)
+        {
+            OnHotkey();
+        }
+        else if (m == Native.WM_SETTINGCHANGE && lParam != IntPtr.Zero && settings.Theme == "System"
+                 && Marshal.PtrToStringUni(lParam) == "ImmersiveColorSet")
+        {
+            Dispatcher.InvokeAsync(ApplyThemeSetting); // Windows switched between light and dark
+        }
         else if (m == Native.WM_DISPLAYCHANGE || m == Native.WM_DPICHANGED ||
                  (m == Native.WM_SETTINGCHANGE && (int)wParam == Native.SPI_SETWORKAREA && !settings.ReserveSpace))
         {
@@ -137,6 +166,7 @@ public partial class MainWindow : Window
         DockItem.Inset = (PillHeight - BaseSize) / 2;
         // Over blur the tint can be lighter and still read as the same Solid/Glass/Clear level.
         // The shadow is dropped too: it renders under the whole translucent pill and muddies the glass.
+        PillBrush.Color = (Color)Application.Current.Resources["T.PillColor"];
         PillBrush.Opacity = settings.BackgroundOpacity * (settings.Blur ? 0.5 : 1);
         pillShadow ??= Pill.Effect;
         Pill.Effect = settings.Blur ? null : pillShadow;
@@ -155,7 +185,7 @@ public partial class MainWindow : Window
         StatusCapsule.CornerRadius = capsuleRadius;
         QuickSettings.CornerRadius = Clock.CornerRadius = capsuleRadius;
         QuickSettings.Padding = new Thickness(8, 0, 6, 0);
-        foreach (var glyph in QuickGlyphs.Children.OfType<TextBlock>())
+        foreach (var glyph in new[] { WifiBack, WifiGlyph, VolumeGlyph, BatteryGlyph })
         {
             glyph.FontSize = 15;
             glyph.Margin = new Thickness(3, 0, 3, 0);
@@ -174,16 +204,18 @@ public partial class MainWindow : Window
         TrayArea.Margin = new Thickness(0, 0, 0, 4);
         TrayMoreGlyph.FontSize = 11;
         // Desktops have no battery; don't show an icon for one.
-        BatteryGlyph.Visibility = Native.HasBattery() ? Visibility.Visible : Visibility.Collapsed;
 
         double sep = BaseSize * 0.6;
         SepLeft.Height = SepRight.Height = sep;
         SepLeft.Margin = SepRight.Margin = new Thickness(6, 0, 6, (PillHeight - sep) / 2);
 
+        double dpiScale = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        IconLoader.Trim(IconLoader.Bucket(BaseSize * dpiScale), IconLoader.Bucket(BaseSize * MaxScale * dpiScale));
         foreach (var item in items)
         {
             item.Scale = item.TargetScale = 1;
             item.Size = BaseSize;
+            item.IconPx = 0; // its cached bitmap may just have been trimmed
             item.RefreshSlot();
             UpdateIcon(item);
             PreloadIcons(item);
@@ -195,7 +227,7 @@ public partial class MainWindow : Window
     {
         if (hwnd == IntPtr.Zero || appBar == null) return;
 
-        var monitor = PrimaryMonitor();
+        var monitor = DockMonitor();
         double s = VisualTreeHelper.GetDpi(this).DpiScaleY;
 
         int bottom;
@@ -206,7 +238,7 @@ public partial class MainWindow : Window
         else
         {
             appBar.Release();
-            bottom = PrimaryMonitor().rcWork.Bottom;
+            bottom = DockMonitor().rcWork.Bottom;
         }
 
         // The window spans the monitor width; everything outside the pill is fully
@@ -261,15 +293,17 @@ public partial class MainWindow : Window
         if (!settings.ReserveSpace && settings.AutoHide && !MenuOpen && settingsWindow == null && pillRect.Width > 0)
         {
             Native.GetCursorPos(out var pt);
-            var work = PrimaryMonitor().rcWork;
+            var monitor = DockMonitor();
+            var work = monitor.rcWork;
             double s = VisualTreeHelper.GetDpi(this).DpiScaleY;
 
             // Reveal by pushing the mouse against the bottom edge; stay while it's over the dock or its magnified icons.
-            bool atEdge = pt.Y >= work.Bottom - 3;
+            bool atEdge = EdgeHeld(pt.Y >= work.Bottom - 3 && pt.Y <= monitor.rcMonitor.Bottom
+                                   && pt.X >= monitor.rcMonitor.Left && pt.X < monitor.rcMonitor.Right);
             int reach = (int)((BaseSize * (MaxScale - 1) + Headroom) * s);
             bool overDock = !autoHidden && pt.X >= pillRect.Left && pt.X < pillRect.Right
                             && pt.Y >= pillRect.Top - reach && pt.Y <= work.Bottom;
-            hide = !atEdge && !overDock && WindowOverlapsDock();
+            hide = !atEdge && !overDock && DateTime.UtcNow >= revealedByHotkeyUntil && WindowOverlapsDock();
         }
         SetAutoHidden(hide);
         AlignShellFlyout();
@@ -310,7 +344,7 @@ public partial class MainWindow : Window
         if (autoHidden || sliding || pillRect.Width <= 0) return;
         var fg = Native.GetForegroundWindow();
         if (!Native.GetWindowRect(fg, out var r)) return;
-        var monitor = PrimaryMonitor().rcMonitor;
+        var monitor = DockMonitor().rcMonitor;
         int x, y, height;
 
         if (Native.GetClass(fg) == "ControlCenterWindow")
@@ -375,7 +409,7 @@ public partial class MainWindow : Window
         if (hide) SetHovered(null);
         else KeepOnTop();
 
-        var anim = new DoubleAnimation(hide ? PillHeight + Gap + 4 : 0, TimeSpan.FromMilliseconds(hide ? 220 : 180))
+        var anim = new DoubleAnimation(hide ? PillHeight + Gap + 4 : 0, Duration(hide ? 220 : 180))
         {
             EasingFunction = new CubicEase { EasingMode = hide ? EasingMode.EaseIn : EasingMode.EaseOut },
         };
@@ -395,12 +429,79 @@ public partial class MainWindow : Window
 
     void OnSlideFrame(object? sender, EventArgs e) => SyncBackdrop();
 
-    static Native.MONITORINFO PrimaryMonitor()
+    /// <summary>An animation length scaled by the animation-speed setting.</summary>
+    TimeSpan Duration(double ms) => TimeSpan.FromMilliseconds(ms / Math.Clamp(settings.AnimationSpeed, 0.25, 4));
+
+    DateTime? edgeSince;
+
+    /// <summary>True once the mouse has rested at the screen edge for the reveal delay.</summary>
+    bool EdgeHeld(bool atEdge)
     {
-        var mon = Native.MonitorFromPoint(new Native.POINT(), Native.MONITOR_DEFAULTTOPRIMARY);
+        if (!atEdge)
+        {
+            edgeSince = null;
+            return false;
+        }
+        edgeSince ??= DateTime.UtcNow;
+        return DateTime.UtcNow - edgeSince.Value >= TimeSpan.FromMilliseconds(settings.RevealDelay);
+    }
+
+    // ---- Keyboard shortcut: Ctrl+Alt+D shows the dock ----
+
+    const int HotkeyId = 0x7A51;
+    const uint MOD_ALT = 0x1, MOD_CONTROL = 0x2, MOD_NOREPEAT = 0x4000, WM_HOTKEY = 0x0312;
+    DateTime revealedByHotkeyUntil;
+
+    [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr h, int id, uint modifiers, uint vk);
+    [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr h, int id);
+
+    public void ApplyHotkeySetting()
+    {
+        if (hwnd == IntPtr.Zero) return;
+        UnregisterHotKey(hwnd, HotkeyId);
+        if (settings.ShowHotkey && !RegisterHotKey(hwnd, HotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'D'))
+            Log.Error(null, "Ctrl+Alt+D is already taken by another app");
+    }
+
+    /// <summary>Shows a hidden dock for a few seconds (it stays while the mouse is on it); hides it again if shown.</summary>
+    void OnHotkey()
+    {
+        if (!autoHidden && DateTime.UtcNow < revealedByHotkeyUntil)
+        {
+            revealedByHotkeyUntil = default;
+            return; // the auto-hide timer slides it away
+        }
+        revealedByHotkeyUntil = DateTime.UtcNow.AddSeconds(4);
+        SetAutoHidden(false);
+        KeepOnTop();
+    }
+
+    // ---- Theme ----
+
+    public void ApplyThemeSetting()
+    {
+        Theme.Apply(settings.Theme);
+        ApplyLayout();
+        SyncBackdrop();
+    }
+
+    /// <summary>The display the dock lives on: the one chosen in settings, or the main one if that's gone.</summary>
+    Native.MONITORINFO DockMonitor()
+    {
+        IntPtr mon = IntPtr.Zero;
+        if (settings.Monitor is { } device)
+            mon = Native.Monitors().FirstOrDefault(m => string.Equals(m.Device, device, StringComparison.OrdinalIgnoreCase)).Handle;
+        if (mon == IntPtr.Zero) mon = Native.MonitorFromPoint(new Native.POINT(), Native.MONITOR_DEFAULTTOPRIMARY);
         var info = new Native.MONITORINFO { cbSize = Marshal.SizeOf<Native.MONITORINFO>() };
         Native.GetMonitorInfo(mon, ref info);
         return info;
+    }
+
+    public void ApplyMonitorSetting()
+    {
+        appBar?.Release(); // the reservation belongs to the old display
+        Reposition();
+        SyncBackdrop();
     }
 
     // ---- Tracking windows -------------------------------------------------------------------
@@ -414,6 +515,7 @@ public partial class MainWindow : Window
     void OnTick()
     {
         UpdateClock();
+        UpdateStatus();
         Refresh();
 
         // Explorer sometimes brings its taskbar back (e.g. after display changes).
@@ -424,7 +526,7 @@ public partial class MainWindow : Window
         {
             hiddenForFullscreen = fullscreen;
             Root.IsHitTestVisible = !fullscreen;
-            Root.BeginAnimation(OpacityProperty, new DoubleAnimation(fullscreen ? 0 : 1, TimeSpan.FromMilliseconds(180)));
+            Root.BeginAnimation(OpacityProperty, new DoubleAnimation(fullscreen ? 0 : 1, Duration(180)));
             SyncBackdrop();
         }
         if (!autoHidden) KeepOnTop();
@@ -478,7 +580,11 @@ public partial class MainWindow : Window
         }
 
         Sync(desired);
-        foreach (var key in itemsByKey.Keys.Where(k => !used.Contains(k)).ToList()) itemsByKey.Remove(key);
+        foreach (var key in itemsByKey.Keys.Where(k => !used.Contains(k)).ToList())
+        {
+            if (itemsByKey[key].IconPath is { } path) IconLoader.Forget(path); // the app left the dock
+            itemsByKey.Remove(key);
+        }
     }
 
     DockItem GetOrCreate(string key, string launchPath, bool pinned, List<AppWindow>? windows)
@@ -557,7 +663,7 @@ public partial class MainWindow : Window
         if (pid == ownPid) return false;
         if (Native.GetClass(fg) is "Progman" or "WorkerW" or "Shell_TrayWnd") return false;
         if (!Native.GetWindowRect(fg, out var r)) return false;
-        var m = PrimaryMonitor().rcMonitor;
+        var m = DockMonitor().rcMonitor;
         return r.Left <= m.Left && r.Top <= m.Top && r.Right >= m.Right && r.Bottom >= m.Bottom;
     }
 
@@ -613,6 +719,8 @@ public partial class MainWindow : Window
 
     void OnAppsMouseMove(object sender, MouseEventArgs e)
     {
+        if (dragItem != null && e.LeftButton == MouseButtonState.Pressed && DragApp(e)) return;
+
         int index = -1;
         double fraction = 0.5;
         for (int i = 0; i < items.Count; i++)
@@ -663,7 +771,7 @@ public partial class MainWindow : Window
             if (Math.Abs(diff) < 0.002) item.Scale = item.TargetScale;
             else
             {
-                item.Scale += diff * 0.28;
+                item.Scale += diff * (1 - Math.Pow(1 - 0.28, settings.AnimationSpeed)); // 0.28 per frame at 1x
                 done = false;
             }
             item.Size = Math.Round(BaseSize * item.Scale); // whole pixels keep icons off half-pixel blur
@@ -688,13 +796,72 @@ public partial class MainWindow : Window
             item.IsHovered = true;
             NameLabelText.Text = item.Name;
         }
+
+        // Previews: shown after a short hover on a running app, then follow the cursor across icons.
+        previewShow.Stop();
+        if (item is { IsRunning: true })
+        {
+            previewHide.Stop();
+            if (PreviewShown) ShowPreview(item);
+            else previewShow.Start();
+        }
+        else if (PreviewShown)
+        {
+            previewHide.Stop();
+            previewHide.Start();
+        }
+        UpdateLabel();
+    }
+
+    void ShowPreview(DockItem item)
+    {
+        if (Apps.ItemContainerGenerator.ContainerFromItem(item) is not FrameworkElement c || item.Windows.Count == 0) return;
+        if (previews == null)
+        {
+            previews = new PreviewWindow();
+            previews.MouseEnter += (_, _) => previewHide.Stop();
+            previews.MouseLeave += (_, _) => { previewHide.Stop(); previewHide.Start(); };
+            previews.WindowChosen += h =>
+            {
+                HidePreview();
+                Activate(h);
+                lastForeground = h;
+                ScheduleRefresh();
+            };
+            previews.WindowClosed += h =>
+            {
+                Native.PostMessage(h, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                // Give the app a moment to close, then show what's left (or nothing).
+                var later = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+                later.Tick += (_, _) =>
+                {
+                    later.Stop();
+                    Refresh();
+                    if (previewItem is { IsRunning: true } p) ShowPreview(p);
+                    else HidePreview();
+                };
+                later.Start();
+            };
+        }
+        previewItem = item;
+        var center = c.PointToScreen(new Point(c.ActualWidth / 2, 0));
+        previews.ShowFor(item.Windows, item.Icon, new Point(center.X, pillRect.Top), hwnd);
+        UpdateLabel();
+    }
+
+    void HidePreview()
+    {
+        previewShow.Stop();
+        previewHide.Stop();
+        previewItem = null;
+        previews?.HidePreviews();
         UpdateLabel();
     }
 
     void UpdateLabel()
     {
         var c = hovered != null ? Apps.ItemContainerGenerator.ContainerFromItem(hovered) as FrameworkElement : trayHover;
-        if (c == null)
+        if (c == null || (PreviewShown && hovered != null)) // the preview names the windows itself
         {
             NameLabel.Visibility = Visibility.Collapsed;
             return;
@@ -706,22 +873,102 @@ public partial class MainWindow : Window
         Canvas.SetTop(NameLabel, top.Y - NameLabel.DesiredSize.Height - 2);
     }
 
+    // ---- Drag to reorder pinned apps ----------------------------------------------------------
+
+    const double DragThreshold = 6;
+    DockItem? dragItem;
+    Point dragStart;
+    bool dragging;
+
+    void OnAppsMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        dragItem = (e.OriginalSource as FrameworkElement)?.DataContext is DockItem { IsPinned: true } item ? item : null;
+        dragStart = e.GetPosition(Apps);
+        dragging = false;
+    }
+
+    /// <summary>Handles a move while a pinned icon is held; true once it has become a drag.</summary>
+    bool DragApp(MouseEventArgs e)
+    {
+        var p = e.GetPosition(Apps);
+        if (!dragging)
+        {
+            if (Math.Abs(p.X - dragStart.X) < DragThreshold) return false;
+            dragging = true;
+            Mouse.Capture(Apps, CaptureMode.SubTree);
+            HidePreview();
+            SetHovered(null);
+            foreach (var item in items) item.TargetScale = 1; // magnifying while dragging just jitters
+            StartAnimating();
+            if (Apps.ItemContainerGenerator.ContainerFromItem(dragItem) is UIElement held) held.Opacity = 0.55;
+        }
+
+        // Swap places with whichever pinned icon is under the cursor.
+        for (int i = 0; i < items.Count; i++)
+        {
+            if (Apps.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement c) continue;
+            double x = e.GetPosition(c).X;
+            if (x < 0 || x >= c.ActualWidth) continue;
+            var target = items[i];
+            if (target != dragItem && target.IsPinned) MovePinnedApp(dragItem!, target);
+            break;
+        }
+        return true;
+    }
+
+    void MovePinnedApp(DockItem item, DockItem target)
+    {
+        int from = settings.Pins.FindIndex(p => PinKey(p).Equals(item.Key, StringComparison.OrdinalIgnoreCase));
+        int to = settings.Pins.FindIndex(p => PinKey(p).Equals(target.Key, StringComparison.OrdinalIgnoreCase));
+        if (from < 0 || to < 0) return;
+        var pin = settings.Pins[from];
+        settings.Pins.RemoveAt(from);
+        settings.Pins.Insert(to, pin);
+        items.Move(items.IndexOf(item), items.IndexOf(target));
+    }
+
+    void OnAppsLostCapture(object sender, MouseEventArgs e)
+    {
+        if (dragging && Mouse.LeftButton != MouseButtonState.Pressed) EndAppDrag();
+    }
+
+    /// <summary>Ends a drag; true if there was one (so the release isn't also a click).</summary>
+    bool EndAppDrag()
+    {
+        bool wasDragging = dragging;
+        if (dragging)
+        {
+            if (Apps.ItemContainerGenerator.ContainerFromItem(dragItem) is UIElement held) held.Opacity = 1;
+            Mouse.Capture(null);
+            settings.Save();
+        }
+        dragging = false;
+        dragItem = null;
+        return wasDragging;
+    }
+
     // ---- Clicks -----------------------------------------------------------------------------
 
     void OnAppsMouseUp(object sender, MouseButtonEventArgs e)
     {
+        if (e.ChangedButton == MouseButton.Left && EndAppDrag())
+        {
+            e.Handled = true;
+            return;
+        }
         if ((e.OriginalSource as FrameworkElement)?.DataContext is not DockItem item) return;
         e.Handled = true;
         switch (e.ChangedButton)
         {
             case MouseButton.Left: OnItemClick(item); break;
             case MouseButton.Middle: Launch(item); break;
-            case MouseButton.Right: ShowItemMenu(item, e.OriginalSource as UIElement); break;
+            case MouseButton.Right: HidePreview(); ShowItemMenu(item, e.OriginalSource as UIElement); break;
         }
     }
 
     void OnItemClick(DockItem item)
     {
+        HidePreview();
         if (!item.IsRunning)
         {
             Launch(item);
@@ -804,6 +1051,44 @@ public partial class MainWindow : Window
         ClockDate.Text = now.ToString("d");
     }
 
+    // ---- Live status icons ------------------------------------------------------------------
+
+    NetworkStatus network = new(NetworkKind.None, 0, "", false);
+    BatteryStatus battery = new(false, 0, false, false);
+    VolumeStatus volume = new(0, false, false);
+    int statusTicks;
+
+    /// <summary>Volume every second (it changes from keyboards and apps); network and battery every 5.</summary>
+    void UpdateStatus()
+    {
+        if (statusTicks++ % 5 == 0)
+        {
+            network = StatusMonitor.Network();
+            battery = StatusMonitor.Battery();
+        }
+        volume = StatusMonitor.Volume();
+
+        WifiGlyph.Text = StatusMonitor.NetworkGlyph(network);
+        WifiBack.Visibility = network.Kind == NetworkKind.Wifi && network.Internet ? Visibility.Visible : Visibility.Collapsed;
+        VolumeGlyph.Text = StatusMonitor.VolumeGlyph(volume);
+        BatteryGlyph.Visibility = battery.Present ? Visibility.Visible : Visibility.Collapsed;
+        BatteryGlyph.Text = StatusMonitor.BatteryGlyph(battery);
+        if (ReferenceEquals(trayHover, QuickSettings)) NameLabelText.Text = StatusMonitor.Describe(network, volume, battery);
+    }
+
+    void OnStatusMouseEnter(object sender, MouseEventArgs e)
+    {
+        trayHover = QuickSettings;
+        NameLabelText.Text = StatusMonitor.Describe(network, volume, battery);
+        UpdateLabel();
+    }
+
+    void OnStatusMouseLeave(object sender, MouseEventArgs e)
+    {
+        if (ReferenceEquals(trayHover, QuickSettings)) trayHover = null;
+        UpdateLabel();
+    }
+
     // ---- System tray ------------------------------------------------------------------------
 
     void ApplyTray()
@@ -827,6 +1112,15 @@ public partial class MainWindow : Window
 
     bool clickAfterDismiss; // the press closed a shell panel; send the whole click once it's gone
 
+    // A left press on a tray icon pinned to the dock is held back until it's clear whether it's a click
+    // (sent to the app on release) or a drag (reorders the pinned icons, and the app never sees it).
+    NotifyIcon? trayPress;
+    FrameworkElement? trayPressElement;
+    Point trayPressStart;
+    bool trayDragging;
+
+    bool InDock(object sender) => sender is FrameworkElement el && TrayPinned.IsAncestorOf(el);
+
     void OnTrayMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (TrayIconOf(sender) is not { } icon) return;
@@ -836,12 +1130,34 @@ public partial class MainWindow : Window
         // the activation), so close it first, the way clicking the real taskbar does.
         clickAfterDismiss = IsShellUi(Native.GetForegroundWindow());
         if (clickAfterDismiss) Native.PressKeys(Native.VK_ESCAPE);
-        else icon.IconMouseDown(e.ChangedButton, MouseHelper.GetCursorPositionParam(), Native.GetDoubleClickTime());
+
+        if (e.ChangedButton == MouseButton.Left && InDock(sender))
+        {
+            trayPress = icon;
+            trayPressElement = (FrameworkElement)sender;
+            trayPressStart = e.GetPosition(TrayPinned);
+            trayDragging = false;
+            return;
+        }
+        if (!clickAfterDismiss) icon.IconMouseDown(e.ChangedButton, MouseHelper.GetCursorPositionParam(), Native.GetDoubleClickTime());
     }
 
     void OnTrayMouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (TrayIconOf(sender) is not { } icon) return;
+        var icon = TrayIconOf(sender);
+        bool heldPress = e.ChangedButton == MouseButton.Left && trayPress != null;
+        if (heldPress)
+        {
+            icon = trayPress;
+            bool wasDrag = trayDragging;
+            EndTrayDrag();
+            if (wasDrag)
+            {
+                e.Handled = true;
+                return;
+            }
+        }
+        if (icon == null) return;
         e.Handled = true;
         if (e.ChangedButton == MouseButton.Left) TrayPopup.IsOpen = false; // like Windows' overflow, get out of the app's way
 
@@ -850,6 +1166,7 @@ public partial class MainWindow : Window
         int doubleClick = Native.GetDoubleClickTime();
         if (!clickAfterDismiss)
         {
+            if (heldPress) icon.IconMouseDown(button, pos, doubleClick);
             icon.IconMouseUp(button, pos, doubleClick);
             return;
         }
@@ -864,7 +1181,59 @@ public partial class MainWindow : Window
         later.Start();
     }
 
-    void OnTrayMouseMove(object sender, MouseEventArgs e) => TrayIconOf(sender)?.IconMouseMove(MouseHelper.GetCursorPositionParam());
+    void OnTrayMouseMove(object sender, MouseEventArgs e)
+    {
+        if (trayPress != null && e.LeftButton == MouseButtonState.Pressed)
+        {
+            var p = e.GetPosition(TrayPinned);
+            if (!trayDragging && Math.Abs(p.X - trayPressStart.X) >= DragThreshold)
+            {
+                trayDragging = true;
+                trayPressElement?.CaptureMouse();
+                if (trayPressElement != null) trayPressElement.Opacity = 0.55;
+                trayHover = null;
+                UpdateLabel();
+            }
+            if (trayDragging)
+            {
+                // Swap places with the pinned tray icon under the cursor.
+                for (int i = 0; i < TrayPinned.Items.Count; i++)
+                {
+                    if (TrayPinned.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement c) continue;
+                    double x = e.GetPosition(c).X;
+                    if (x < 0 || x >= c.ActualWidth) continue;
+                    if (TrayPinned.Items[i] is NotifyIcon target && target != trayPress) tray.MovePin(trayPress, target);
+                    break;
+                }
+                return;
+            }
+        }
+        TrayIconOf(sender)?.IconMouseMove(MouseHelper.GetCursorPositionParam());
+    }
+
+    void EndTrayDrag()
+    {
+        if (trayDragging)
+        {
+            trayPressElement?.ReleaseMouseCapture();
+            tray.SavePins();
+        }
+        // Containers are recycled when the view re-sorts, so restore every one's opacity.
+        for (int i = 0; i < TrayPinned.Items.Count; i++)
+            if (TrayPinned.ItemContainerGenerator.ContainerFromIndex(i) is UIElement c)
+                foreach (var child in SelfAndDescendants(c)) child.Opacity = 1;
+        trayPress = null;
+        trayPressElement = null;
+        trayDragging = false;
+    }
+
+    static IEnumerable<UIElement> SelfAndDescendants(UIElement root)
+    {
+        yield return root;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            if (VisualTreeHelper.GetChild(root, i) is UIElement child)
+                foreach (var d in SelfAndDescendants(child)) yield return d;
+    }
 
     void OnTrayMouseEnter(object sender, MouseEventArgs e)
     {
@@ -971,27 +1340,72 @@ public partial class MainWindow : Window
 
     // ---- Menus ------------------------------------------------------------------------------
 
+    /// <summary>The ID Windows keeps the app's recent documents under.</summary>
+    string AppIdFor(DockItem item)
+    {
+        if (item.LaunchPath.StartsWith(AppWindow.AppsFolder, StringComparison.OrdinalIgnoreCase))
+            return item.LaunchPath[AppWindow.AppsFolder.Length..];
+        foreach (var w in item.Windows)
+            if ((w.Aumid ?? Native.GetWindowAppUserModelId(w.Hwnd)) is { Length: > 0 } explicitId) return explicitId;
+        var exe = item.Windows.FirstOrDefault()?.ExePath ?? item.Key;
+        return JumpList.ImplicitAppId(exe);
+    }
+
+    /// <summary>Opens a recent document with the app it was recent in (not just the default handler).</summary>
+    void OpenRecent(DockItem item, RecentItem recent)
+    {
+        try
+        {
+            var exe = item.Windows.FirstOrDefault()?.ExePath ?? item.LaunchPath;
+            var start = exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(exe) && File.Exists(recent.Path)
+                ? new ProcessStartInfo(exe, $"\"{recent.Path}\"") { UseShellExecute = true }
+                : new ProcessStartInfo(recent.Path) { UseShellExecute = true };
+            Process.Start(start);
+        }
+        catch (Exception ex) { Log.Error(ex, $"opening {recent.Path}"); }
+    }
+
     void ShowItemMenu(DockItem item, UIElement? target)
     {
         var menu = new ContextMenu();
-        foreach (var w in item.Windows)
-        {
-            var h = w.Hwnd;
-            var title = Native.GetText(h);
-            if (title.Length > 60) title = title[..57] + "…";
-            menu.Items.Add(Item(title, () => Activate(h), h == lastForeground));
-        }
-        if (item.Windows.Count > 0) menu.Items.Add(new Separator());
 
-        menu.Items.Add(Item(item.IsRunning ? "New window" : "Open", () => Launch(item)));
-        menu.Items.Add(Item(item.IsPinned ? "Unpin from dock" : "Pin to dock", () => TogglePin(item)));
+        var recent = JumpList.Recent(AppIdFor(item), 6);
+        if (recent.Count > 0)
+        {
+            menu.Items.Add(Section("Recent"));
+            foreach (var r in recent)
+            {
+                var entry = Item(FriendlyName(r), () => OpenRecent(item, r), icon: RecentIcon(r));
+                entry.ToolTip = r.Path;
+                menu.Items.Add(entry);
+            }
+            menu.Items.Add(new Separator());
+        }
+
+        if (item.Windows.Count > 0)
+        {
+            menu.Items.Add(Section(item.Name));
+            foreach (var w in item.Windows)
+            {
+                var h = w.Hwnd;
+                menu.Items.Add(Item(Native.GetText(h), () => Activate(h), icon: MenuImage(item.Icon), active: h == lastForeground));
+            }
+            menu.Items.Add(new Separator());
+        }
+
+        menu.Items.Add(item.IsRunning
+            ? Item("New window", () => Launch(item), icon: Glyph(""))
+            : Item($"Open {item.Name}", () => Launch(item), icon: MenuImage(item.Icon) ?? (object)Glyph("")));
+        menu.Items.Add(item.IsPinned
+            ? Item("Unpin from dock", () => TogglePin(item), icon: Glyph(""))
+            : Item("Pin to dock", () => TogglePin(item), icon: Glyph("")));
         if (item.IsRunning)
         {
             menu.Items.Add(Item(item.Windows.Count > 1 ? "Close all windows" : "Close window", () =>
             {
                 foreach (var w in item.Windows) Native.PostMessage(w.Hwnd, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
                 ScheduleRefresh();
-            }));
+            }, icon: Glyph("")));
         }
         Open(menu, target);
     }
@@ -1046,14 +1460,15 @@ public partial class MainWindow : Window
     void ShowDockMenu(UIElement? target)
     {
         var menu = new ContextMenu();
-        menu.Items.Add(Item("Dock settings…", OpenSettings));
+        menu.Items.Add(Item("Dock settings…", OpenSettings, icon: Glyph("\uE713")));
         menu.Items.Add(new Separator());
+        menu.Items.Add(Section("When windows reach the dock"));
 
         foreach (var (label, reserve, autoHide) in new[]
                  {
-                     ("Keep windows above the dock", true, settings.AutoHide),
-                     ("Hide when a window overlaps", false, true),
-                     ("Always show over windows", false, false),
+                     ("Keep them above the dock", true, settings.AutoHide),
+                     ("Hide the dock", false, true),
+                     ("Show the dock over them", false, false),
                  })
         {
             bool current = settings.ReserveSpace ? reserve : !reserve && settings.AutoHide == autoHide;
@@ -1073,7 +1488,7 @@ public partial class MainWindow : Window
             () => { settings.HideTaskbar = !settings.HideTaskbar; settings.Save(); ApplyTaskbarSetting(); settingsWindow?.Reload(); },
             settings.HideTaskbar));
         menu.Items.Add(new Separator());
-        menu.Items.Add(Item("Exit Tasky", () => Application.Current.Shutdown()));
+        menu.Items.Add(Item("Exit Tasky", () => Application.Current.Shutdown(), icon: Glyph("\uE7E8")));
 
         Open(menu, target);
     }
@@ -1088,11 +1503,55 @@ public partial class MainWindow : Window
         menu.IsOpen = true;
     }
 
-    static MenuItem Item(string header, Action onClick, bool isChecked = false)
+    /// <summary>A menu row: <paramref name="icon"/> is a glyph or image; <paramref name="active"/> marks the window in front.</summary>
+    static MenuItem Item(string header, Action onClick, bool isChecked = false, object? icon = null, bool active = false)
     {
-        var item = new MenuItem { Header = header, IsChecked = isChecked };
+        var item = new MenuItem
+        {
+            Header = new TextBlock { Text = header, TextTrimming = TextTrimming.CharacterEllipsis },
+            IsChecked = isChecked,
+            Icon = icon,
+            Tag = active ? "Active" : null,
+        };
         item.Click += (_, _) => onClick();
         return item;
+    }
+
+    static MenuItem Section(string title) => new() { Header = title, Style = (Style)Application.Current.FindResource("MenuHeader") };
+
+    /// <summary>A 16 px icon from Segoe Fluent Icons for a menu row.</summary>
+    static TextBlock Glyph(string code) => new()
+    {
+        Text = code,
+        FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+        FontSize = 14,
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
+    };
+
+    static Image? MenuImage(ImageSource? source)
+    {
+        if (source == null) return null;
+        var image = new Image { Source = source, Width = 16, Height = 16, Stretch = Stretch.Uniform };
+        RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
+        return image;
+    }
+
+    /// <summary>"youtube.com/shorts/abc" for a web address; the file or folder name otherwise.</summary>
+    static string FriendlyName(RecentItem r)
+    {
+        if (Uri.TryCreate(r.Path, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
+        {
+            var host = uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? uri.Host[4..] : uri.Host;
+            return (host + uri.AbsolutePath).TrimEnd('/');
+        }
+        return r.Name;
+    }
+
+    static object RecentIcon(RecentItem r)
+    {
+        if (r.Path.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return Glyph(""); // globe
+        return MenuImage(IconLoader.Small(r.Path)) ?? (object)Glyph(""); // the file's own icon, else a page
     }
 
     void TogglePin(DockItem item)
@@ -1172,6 +1631,8 @@ public partial class MainWindow : Window
             if (settings.TaskbarHiddenByUs) RestoreTaskbar();
             appBar?.Release();
             if (hwnd != IntPtr.Zero) Native.DeregisterShellHookWindow(hwnd);
+            if (hwnd != IntPtr.Zero) UnregisterHotKey(hwnd, HotkeyId);
+            previews?.Close();
         }
         catch (Exception ex) { Log.Error(ex, "cleanup"); }
     }

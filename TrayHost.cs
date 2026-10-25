@@ -52,12 +52,42 @@ internal sealed class TrayHost(Settings settings)
     /// </summary>
     static string PinKey(NotifyIcon icon) => icon.GUID != Guid.Empty ? icon.GUID.ToString() : $"{icon.Path}:{icon.UID}";
 
-    readonly HashSet<string> pins = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Pinned icons' keys, in dock order (the user's order, not ManagedShell's PinOrder).</summary>
+    readonly List<string> pins = new();
+
+    int PinIndex(NotifyIcon icon)
+    {
+        int i = pins.FindIndex(k => string.Equals(k, PinKey(icon), StringComparison.OrdinalIgnoreCase));
+        return i < 0 ? int.MaxValue : i;
+    }
 
     /// <summary>Pins an icon that was pinned last time, as soon as its app adds it.</summary>
     void RestorePin(NotifyIcon icon)
     {
-        if (!icon.IsPinned && pins.Contains(PinKey(icon))) icon.Pin();
+        if (!icon.IsPinned && PinIndex(icon) != int.MaxValue) icon.Pin();
+    }
+
+    sealed class ByPinOrder(TrayHost host) : System.Collections.IComparer
+    {
+        public int Compare(object? a, object? b) =>
+            a is NotifyIcon x && b is NotifyIcon y ? host.PinIndex(x).CompareTo(host.PinIndex(y)) : 0;
+    }
+
+    /// <summary>Moves a pinned icon to where <paramref name="target"/> is (drag to reorder).</summary>
+    public void MovePin(NotifyIcon icon, NotifyIcon target)
+    {
+        int from = PinIndex(icon), to = PinIndex(target);
+        if (from == int.MaxValue || to == int.MaxValue || from == to) return;
+        var key = pins[from];
+        pins.RemoveAt(from);
+        pins.Insert(to, key);
+        Pinned?.Refresh();
+    }
+
+    public void SavePins()
+    {
+        settings.TrayPins = pins.ToList();
+        settings.Save();
     }
 
     public bool Start()
@@ -67,7 +97,7 @@ internal sealed class TrayHost(Settings settings)
         {
             service = new TrayService();
             pins.Clear();
-            pins.UnionWith(settings.TrayPins ?? new List<string>());
+            pins.AddRange((settings.TrayPins ?? new List<string>()).Distinct(StringComparer.OrdinalIgnoreCase));
             // Pinning is ours (see PinKey), and ManagedShell's defaults are Explorer's system icons anyway.
             Area = new NotificationArea(Array.Empty<string>(), service, new ExplorerTrayService());
             // Other apps' app-bar messages now reach our tray window first. Leave every one unhandled so
@@ -78,9 +108,7 @@ internal sealed class TrayHost(Settings settings)
             if (!Area.IsFailed)
             {
                 Pinned = View(o => IsAppIcon(o) && ((NotifyIcon)o).IsPinned, nameof(NotifyIcon.IsPinned), nameof(NotifyIcon.IsHidden));
-                Pinned.SortDescriptions.Add(new SortDescription(nameof(NotifyIcon.PinOrder), ListSortDirection.Ascending));
-                Pinned.IsLiveSorting = true;
-                Pinned.LiveSortingProperties.Add(nameof(NotifyIcon.PinOrder));
+                Pinned.CustomSort = new ByPinOrder(this);
                 All = View(IsAppIcon, nameof(NotifyIcon.IsHidden));
 
                 foreach (var icon in Area.TrayIcons.ToList()) RestorePin(icon);
@@ -119,18 +147,20 @@ internal sealed class TrayHost(Settings settings)
     public void TogglePin(NotifyIcon icon)
     {
         if (Area == null) return;
+        var key = PinKey(icon);
         if (icon.IsPinned)
         {
             icon.Unpin();
-            pins.Remove(PinKey(icon));
+            pins.RemoveAll(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
         }
         else
         {
+            pins.RemoveAll(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
+            pins.Add(key); // newly pinned icons go at the end
             icon.Pin();
-            pins.Add(PinKey(icon));
         }
-        settings.TrayPins = pins.ToList();
-        settings.Save();
+        Pinned?.Refresh();
+        SavePins();
     }
 
     /// <summary>Tells apps where the tray is (screen pixels) so their menus and flyouts open beside the dock.</summary>

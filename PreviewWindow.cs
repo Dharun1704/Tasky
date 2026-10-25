@@ -1,0 +1,226 @@
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+
+namespace Tasky;
+
+/// <summary>
+/// Live window previews above a dock icon, drawn by DWM thumbnails (what the Windows taskbar uses).
+/// A normal, non-layered window: DWM can't draw thumbnails into a per-pixel-transparent one.
+/// </summary>
+internal sealed class PreviewWindow : Window
+{
+    const double MaxThumbWidth = 220, MaxThumbHeight = 140, CardPadding = 6;
+
+    readonly StackPanel cards = new() { Orientation = Orientation.Horizontal };
+    readonly List<(IntPtr Thumb, FrameworkElement Area, IntPtr Source)> thumbs = new();
+    IntPtr hwnd;
+
+    public event Action<IntPtr>? WindowChosen;
+    public event Action<IntPtr>? WindowClosed;
+
+    public PreviewWindow()
+    {
+        WindowStyle = WindowStyle.None;
+        ResizeMode = ResizeMode.NoResize;
+        ShowInTaskbar = false;
+        ShowActivated = false;
+        Topmost = true;
+        SizeToContent = SizeToContent.WidthAndHeight;
+        SetResourceReference(BackgroundProperty, "T.PreviewBg");
+        FontFamily = (FontFamily)Application.Current.Resources["UiFont"];
+        UseLayoutRounding = true;
+        Content = new Border { Padding = new Thickness(3), Child = cards };
+        SetResourceReference(ForegroundProperty, "T.Fg"); // titles and the close glyph inherit it
+        Left = Top = -10000;
+
+        SourceInitialized += (_, _) =>
+        {
+            hwnd = new WindowInteropHelper(this).Handle;
+            long ex = Native.GetWindowLongPtr(hwnd, Native.GWL_EXSTYLE).ToInt64();
+            Native.SetWindowLongPtr(hwnd, Native.GWL_EXSTYLE, new IntPtr(ex | Native.WS_EX_NOACTIVATE | Native.WS_EX_TOOLWINDOW));
+            int corner = Native.DWMWCP_ROUND;
+            Native.DwmSetWindowAttribute(hwnd, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
+        };
+        LayoutUpdated += (_, _) => PlaceThumbnails();
+    }
+
+    /// <summary>DWM's border and shadow to match the dock's theme.</summary>
+    void ApplyFrame()
+    {
+        int dark = Theme.IsLight ? 0 : 1, border = Theme.IsLight ? 0x00D8D8D8 : 0x00444444; // COLORREF is 0x00BBGGRR
+        Native.DwmSetWindowAttribute(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, ref dark, sizeof(int));
+        Native.DwmSetWindowAttribute(hwnd, Native.DWMWA_BORDER_COLOR, ref border, sizeof(int));
+    }
+
+    /// <summary>Shows previews of <paramref name="windows"/> centred above <paramref name="anchorTopCenter"/> (screen px).</summary>
+    public void ShowFor(IReadOnlyList<AppWindow> windows, ImageSource? icon, Point anchorTopCenter, IntPtr owner)
+    {
+        ClearThumbs();
+        cards.Children.Clear();
+        if (hwnd == IntPtr.Zero)
+        {
+            new WindowInteropHelper(this).Owner = owner;
+            Show(); // creates the window so thumbnails have somewhere to draw
+        }
+        ApplyFrame();
+
+        foreach (var w in windows) cards.Children.Add(MakeCard(w, icon));
+        if (!IsVisible) Show();
+
+        UpdateLayout();
+        var dpi = VisualTreeHelper.GetDpi(this);
+        double width = ActualWidth * dpi.DpiScaleX, height = ActualHeight * dpi.DpiScaleY;
+        var mon = Native.MonitorFromPoint(new Native.POINT { X = (int)anchorTopCenter.X, Y = (int)anchorTopCenter.Y }, 2 /* NEAREST */);
+        var info = new Native.MONITORINFO { cbSize = Marshal.SizeOf<Native.MONITORINFO>() };
+        Native.GetMonitorInfo(mon, ref info);
+        var screen = info.rcMonitor;
+        double x = Math.Clamp(anchorTopCenter.X - width / 2, screen.Left + 8, Math.Max(screen.Left + 8, screen.Right - width - 8));
+        double y = anchorTopCenter.Y - height - 10;
+        Native.SetWindowPos(hwnd, IntPtr.Zero, (int)x, (int)y, 0, 0, Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
+        PlaceThumbnails();
+    }
+
+    public void HidePreviews()
+    {
+        ClearThumbs();
+        cards.Children.Clear();
+        if (IsVisible) Hide();
+    }
+
+    FrameworkElement MakeCard(AppWindow w, ImageSource? icon)
+    {
+        // Minimized windows included: DWM keeps the last image of a minimized window, which is what
+        // the Windows taskbar shows for them too.
+        IntPtr thumb = IntPtr.Zero;
+        bool hasThumb = hwnd != IntPtr.Zero && DwmRegisterThumbnail(hwnd, w.Hwnd, out thumb) == 0;
+        var source = WindowSize(w.Hwnd, hasThumb ? thumb : IntPtr.Zero);
+        // DWM reports a caption-bar-sized source when it has no image to give; show the app icon then.
+        bool usable = hasThumb && source.Width >= 120 && source.Height >= 80;
+        if (hasThumb && !usable) DwmUnregisterThumbnail(thumb);
+        var size = Fit(usable ? source : new Size(16, 10));
+
+        var area = new Grid { Width = size.Width, Height = size.Height };
+        area.SetResourceReference(Panel.BackgroundProperty, "T.CapsuleBg");
+        if (!usable && icon != null)
+            area.Children.Add(new Image { Source = icon, Width = 40, Height = 40, Opacity = 0.9 });
+
+        var title = new TextBlock
+        {
+            Text = Native.GetText(w.Hwnd),
+            FontSize = 12,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(2, 0, 4, 0),
+        };
+        var close = new Border
+        {
+            Width = 20, Height = 20, CornerRadius = new CornerRadius(4), Background = Brushes.Transparent,
+            Child = new TextBlock
+            {
+                Text = "\uE711", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 10,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+        close.MouseEnter += (_, _) => close.Background = new SolidColorBrush(Color.FromRgb(0xC4, 0x2B, 0x1C));
+        close.MouseLeave += (_, _) => close.Background = Brushes.Transparent;
+        close.MouseLeftButtonUp += (_, e) => { e.Handled = true; WindowClosed?.Invoke(w.Hwnd); };
+
+        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 4), Height = 20 };
+        DockPanel.SetDock(close, Dock.Right);
+        header.Children.Add(close);
+        header.Children.Add(title);
+
+        var card = new Border
+        {
+            Padding = new Thickness(CardPadding),
+            CornerRadius = new CornerRadius(5),
+            Background = Brushes.Transparent,
+            Width = size.Width + CardPadding * 2,
+            Child = new StackPanel { Children = { header, area } },
+            Cursor = Cursors.Hand,
+        };
+        card.MouseEnter += (_, _) => card.SetResourceReference(Border.BackgroundProperty, "T.MenuHover");
+        card.MouseLeave += (_, _) => card.Background = Brushes.Transparent;
+        card.MouseLeftButtonUp += (_, _) => WindowChosen?.Invoke(w.Hwnd);
+
+        if (usable) thumbs.Add((thumb, area, w.Hwnd));
+        return card;
+    }
+
+    /// <summary>The window's size in pixels: what DWM will draw, else its on-screen (or restored) frame.</summary>
+    static Size WindowSize(IntPtr window, IntPtr thumb)
+    {
+        if (thumb != IntPtr.Zero && DwmQueryThumbnailSourceSize(thumb, out var s) == 0 && s.cx > 0 && s.cy > 0)
+            return new Size(s.cx, s.cy);
+        if (Native.DwmGetWindowAttribute(window, Native.DWMWA_EXTENDED_FRAME_BOUNDS, out Native.RECT r, 16) == 0 && r.Width > 0 && r.Height > 0)
+            return new Size(r.Width, r.Height);
+        return new Size(16, 10);
+    }
+
+    /// <summary>Scales a window's shape to fit the preview box (in DIPs).</summary>
+    static Size Fit(Size source)
+    {
+        double scale = Math.Min(MaxThumbWidth / source.Width, MaxThumbHeight / source.Height);
+        return new Size(Math.Round(source.Width * scale), Math.Round(source.Height * scale));
+    }
+
+    void PlaceThumbnails()
+    {
+        if (hwnd == IntPtr.Zero || thumbs.Count == 0 || !IsVisible) return;
+        var dpi = VisualTreeHelper.GetDpi(this);
+        foreach (var (thumb, area, _) in thumbs)
+        {
+            if (!area.IsVisible) continue;
+            var topLeft = area.TranslatePoint(new Point(0, 0), this);
+            var props = new DWM_THUMBNAIL_PROPERTIES
+            {
+                dwFlags = DWM_TNP_RECTDESTINATION | DWM_TNP_VISIBLE | DWM_TNP_OPACITY | DWM_TNP_SOURCECLIENTAREAONLY,
+                rcDestination = new Native.RECT
+                {
+                    Left = (int)Math.Round(topLeft.X * dpi.DpiScaleX),
+                    Top = (int)Math.Round(topLeft.Y * dpi.DpiScaleY),
+                    Right = (int)Math.Round((topLeft.X + area.ActualWidth) * dpi.DpiScaleX),
+                    Bottom = (int)Math.Round((topLeft.Y + area.ActualHeight) * dpi.DpiScaleY),
+                },
+                opacity = 255,
+                fVisible = 1,
+                fSourceClientAreaOnly = 0,
+            };
+            DwmUpdateThumbnailProperties(thumb, ref props);
+        }
+    }
+
+    void ClearThumbs()
+    {
+        foreach (var (thumb, _, _) in thumbs) DwmUnregisterThumbnail(thumb);
+        thumbs.Clear();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        ClearThumbs();
+        base.OnClosed(e);
+    }
+
+    const int DWM_TNP_RECTDESTINATION = 0x1, DWM_TNP_OPACITY = 0x4, DWM_TNP_VISIBLE = 0x8, DWM_TNP_SOURCECLIENTAREAONLY = 0x10;
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct DWM_THUMBNAIL_PROPERTIES
+    {
+        public int dwFlags;
+        public Native.RECT rcDestination;
+        public Native.RECT rcSource;
+        public byte opacity;
+        public int fVisible;
+        public int fSourceClientAreaOnly;
+    }
+
+    [DllImport("dwmapi.dll")] static extern int DwmRegisterThumbnail(IntPtr destination, IntPtr source, out IntPtr thumb);
+    [DllImport("dwmapi.dll")] static extern int DwmUnregisterThumbnail(IntPtr thumb);
+    [DllImport("dwmapi.dll")] static extern int DwmQueryThumbnailSourceSize(IntPtr thumb, out Native.SIZE size);
+    [DllImport("dwmapi.dll")] static extern int DwmUpdateThumbnailProperties(IntPtr thumb, ref DWM_THUMBNAIL_PROPERTIES props);
+}

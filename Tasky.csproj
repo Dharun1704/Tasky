@@ -7,6 +7,20 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>1.1.0</Version>
+    <Product>Tasky</Product>
+    <Description>A floating dock for Windows 11</Description>
+    <Copyright>Dharun Vaibhav U</Copyright>
+  </PropertyGroup>
+
+  <!-- `dotnet publish` makes a single Tasky.exe (it still needs the .NET 10 Desktop Runtime).
+       Only when publishing, so day-to-day builds keep their usual output folder. -->
+  <PropertyGroup Condition="'$(_IsPublishing)' == 'true'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>embedded</DebugType>
   </PropertyGroup>
 
   <ItemGroup>

@@ -49,14 +49,54 @@ public partial class SettingsWindow : Window
         Blur.IsChecked = settings.Blur;
         ClockSize.Value = settings.ClockFontSize;
         EdgeGap.Value = settings.EdgeGap;
+        AnimationSpeed.Value = settings.AnimationSpeed;
+        RevealDelay.Value = settings.RevealDelay;
+        ShowHotkey.IsChecked = settings.ShowHotkey;
+        ThemeSystem.IsChecked = settings.Theme is not ("Dark" or "Light");
+        ThemeDark.IsChecked = settings.Theme == "Dark";
+        ThemeLight.IsChecked = settings.Theme == "Light";
         ModeReserve.IsChecked = settings.ReserveSpace;
         ModeAutoHide.IsChecked = !settings.ReserveSpace && settings.AutoHide;
         ModeAlways.IsChecked = !settings.ReserveSpace && !settings.AutoHide;
         ShowTray.IsChecked = settings.ShowTray;
         HideTaskbar.IsChecked = settings.HideTaskbar;
         AutoStart.IsChecked = Tasky.AutoStart.Enabled;
+        StartMenu.IsChecked = StartMenuShortcut.Exists;
+        LoadMonitors();
+        var version = typeof(SettingsWindow).Assembly.GetName().Version;
+        VersionText.Text = $"Tasky {version?.ToString(3)}";
         loading = false;
         UpdateLabels();
+    }
+
+    /// <summary>One choice per display, e.g. "Display 2 · 1920 × 1080".</summary>
+    void LoadMonitors()
+    {
+        MonitorChoices.Children.Clear();
+        var monitors = Native.Monitors();
+        string? current = monitors.Any(m => string.Equals(m.Device, settings.Monitor, StringComparison.OrdinalIgnoreCase))
+            ? settings.Monitor : null;
+        for (int i = 0; i < monitors.Count; i++)
+        {
+            var m = monitors[i];
+            string number = new string(m.Device.Where(char.IsDigit).ToArray());
+            var choice = new RadioButton
+            {
+                GroupName = "Monitor",
+                Style = (Style)FindResource("Choice"),
+                Content = $"Display {(number.Length > 0 ? number : (i + 1).ToString())} · {m.Bounds.Width} × {m.Bounds.Height}{(m.Primary ? " (main)" : "")}",
+                IsChecked = current == null ? m.Primary : string.Equals(m.Device, current, StringComparison.OrdinalIgnoreCase),
+            };
+            string? device = m.Primary ? null : m.Device; // the main display is stored as null, so it follows a main-display change
+            choice.Checked += (_, _) =>
+            {
+                if (loading) return;
+                settings.Monitor = device;
+                dock.ApplyMonitorSetting();
+                Changed(look: false);
+            };
+            MonitorChoices.Children.Add(choice);
+        }
     }
 
     void Wire()
@@ -74,12 +114,30 @@ public partial class SettingsWindow : Window
         Look(BackgroundOpacity, v => settings.BackgroundOpacity = v / 100);
         Look(EdgeGap, v => settings.EdgeGap = v);
         Look(ClockSize, v => settings.ClockFontSize = v);
+        Look(AnimationSpeed, v => settings.AnimationSpeed = Math.Round(v, 1));
+        RevealDelay.ValueChanged += (_, e) =>
+        {
+            if (loading) return;
+            settings.RevealDelay = (int)e.NewValue;
+            Changed(look: false);
+        };
+        Toggle(ShowHotkey, on => { settings.ShowHotkey = on; dock.ApplyHotkeySetting(); });
+
+        foreach (var (button, theme) in new[] { (ThemeSystem, "System"), (ThemeDark, "Dark"), (ThemeLight, "Light") })
+            button.Checked += (_, _) =>
+            {
+                if (loading) return;
+                settings.Theme = theme;
+                dock.ApplyThemeSetting();
+                Changed(look: false);
+            };
 
         Toggle(Magnify, on => settings.Magnify = on, look: true);
         Toggle(Blur, on => settings.Blur = on, look: true);
         Toggle(ShowTray, on => { settings.ShowTray = on; dock.ApplyTraySetting(); });
         Toggle(HideTaskbar, on => { settings.HideTaskbar = on; dock.ApplyTaskbarSetting(); });
         Toggle(AutoStart, on => Tasky.AutoStart.Enabled = on);
+        Toggle(StartMenu, on => { if (on) StartMenuShortcut.Create(); else StartMenuShortcut.Remove(); });
 
         Mode(ModeReserve, reserve: true, autoHide: settings.AutoHide);
         Mode(ModeAutoHide, reserve: false, autoHide: true);
@@ -130,6 +188,8 @@ public partial class SettingsWindow : Window
         OpacityValue.Text = $"{settings.BackgroundOpacity * 100:0}%";
         GapValue.Text = $"{settings.EdgeGap:0} px";
         ClockSizeValue.Text = $"{settings.ClockFontSize:0.#} px";
+        SpeedValue.Text = $"{settings.AnimationSpeed:0.0}×";
+        RevealValue.Text = settings.RevealDelay == 0 ? "Instant" : $"{settings.RevealDelay} ms";
     }
 
     void OnReset(object sender, RoutedEventArgs e)
@@ -143,6 +203,12 @@ public partial class SettingsWindow : Window
         settings.BackgroundOpacity = defaults.BackgroundOpacity;
         settings.Blur = defaults.Blur;
         settings.EdgeGap = defaults.EdgeGap;
+        settings.AnimationSpeed = defaults.AnimationSpeed;
+        if (settings.Theme != defaults.Theme)
+        {
+            settings.Theme = defaults.Theme;
+            dock.ApplyThemeSetting();
+        }
         settings.ClockFontSize = defaults.ClockFontSize;
         LoadValues();
         dock.ApplyLook();
@@ -150,4 +216,18 @@ public partial class SettingsWindow : Window
     }
 
     void OnDone(object sender, RoutedEventArgs e) => Close();
+
+    void OnGitHub(object sender, RoutedEventArgs e) => Open("https://github.com/Dharun1704/Tasky");
+
+    void OnDataFolder(object sender, RoutedEventArgs e)
+    {
+        System.IO.Directory.CreateDirectory(Settings.Folder);
+        Open(Settings.Folder);
+    }
+
+    static void Open(string target)
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(target) { UseShellExecute = true }); }
+        catch (Exception ex) { Log.Error(ex, $"opening {target}"); }
+    }
 }

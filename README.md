@@ -4,12 +4,14 @@ A floating dock for Windows 11. It sits at the bottom of the screen in place of 
 
 ![Tasky's dock: Start, pinned and running apps with one magnified under the cursor, the tray arrow, Quick Settings icons, the clock and the settings gear](docs/dock.png)
 
-- **Apps:** pinned and running apps in one row. Icons grow as the mouse passes over them, a dot marks running apps and a bar marks the one in front.
-- **Glass:** a rounded, see-through dock with real blur behind it.
+- **Apps:** pinned and running apps in one row. Icons grow as the mouse passes over them, a dot marks running apps and a bar marks the one in front. Drag pinned icons to reorder them.
+- **Previews:** hover a running app to see live thumbnails of its windows; click one to switch to it, or close it from there.
+- **Recent files:** right-click an app for the documents and folders you used in it recently.
+- **Glass:** a rounded, see-through dock with real blur behind it, in a dark or light theme (or matching Windows).
 - **Out of the way:** keep windows above the dock, let it hide whenever a window overlaps it, or keep it always on top. It also steps aside for fullscreen games and videos.
 - **Tray:** apps' tray icons (OneDrive, Discord, Bluetooth…) live in the dock. Pin the ones you use; the rest wait behind the arrow.
-- **Windows bits:** Start button, Quick Settings (wifi, volume, battery) and a clock that opens the notification center.
-- **Settings:** sliders for icon size, spacing, magnification, corner roundness, opacity, clock size and distance from the screen edge. Changes show on the dock as you make them.
+- **Windows bits:** Start button, live Wi-Fi, volume and battery icons that open Quick Settings, and a clock that opens the notification center.
+- **Settings:** sliders for icon size, spacing, magnification, corner roundness, opacity, clock size, distance from the screen edge and animation speed, plus which display the dock lives on. Changes show on the dock as you make them.
 
 > **Heads-up:** Tasky leans on parts of Windows that Microsoft doesn't document: the blur, taking over the system tray, hiding the taskbar and placing Quick Settings. A Windows update (Insider builds especially) can break one of them. **Exit Tasky always gives you the normal Windows taskbar back.**
 
@@ -40,12 +42,12 @@ Tasky is built from source.
    ```bash
    git clone https://github.com/Dharun1704/Tasky.git
    ```
-2. **Build it** from inside the downloaded folder (`Tasky`, or `Tasky-main` if you used the ZIP). This puts a ready-to-run copy in `publish`:
+2. **Build it** from inside the downloaded folder (`Tasky`, or `Tasky-main` if you used the ZIP). This puts a single `Tasky.exe` in `publish`:
    ```bash
    dotnet publish -c Release -o publish
    ```
 3. **Start it:** double-click **`publish\Tasky.exe`**. The dock appears at the bottom of the screen.
-4. Optional: click the **gear** on the dock and turn on **Start with Windows**.
+4. Optional: click the **gear** on the dock and turn on **Start with Windows** and **Show Tasky in the Start menu**.
 
 Settings, pins and an error log are kept in `%APPDATA%\Tasky`.
 
@@ -57,28 +59,31 @@ Settings, pins and an error log are kept in `%APPDATA%\Tasky`.
 
 | Action | What happens |
 | --- | --- |
+| Hover | Shows live previews of the app's windows. Click a preview to switch to that window, or **×** to close it. |
 | Click | Opens a pinned app, brings a running app to the front, or minimizes it if it's already in front. Apps with several windows cycle through them. |
 | Middle-click | Opens a new window. |
-| Right-click | Lists the app's windows, plus **New window**, **Pin / Unpin** and **Close**. |
+| Right-click | Recent files and folders, the app's windows, plus **New window**, **Pin / Unpin** and **Close**. |
+| Drag a pinned icon sideways | Moves it. |
 | Drag an `.exe` or shortcut onto the dock | Pins it. |
 
 **The rest of the dock**
 
 - **Start button:** opens the Start menu. The Windows key works too, and brings up a hidden dock.
-- **Arrow (^):** shows every tray icon. Hover one and click its pin to keep it on the dock. Clicks, right-clicks and double-clicks on tray icons go to the app, just like the Windows tray.
-- **Wifi / volume / battery:** opens Windows Quick Settings, right above the dock.
+- **Arrow (^):** shows every tray icon. Hover one and click its pin to keep it on the dock; drag pinned tray icons to reorder them. Clicks, right-clicks and double-clicks on tray icons go to the app, just like the Windows tray.
+- **Wi-Fi / volume / battery:** show signal strength, volume or mute, and charge as they change (hover for the details). Click to open Windows Quick Settings right above the dock.
 - **Clock:** opens the notification center and calendar.
 - **Gear:** opens Tasky's settings. Right-clicking empty space on the dock gives a quick menu with the dock modes and **Exit Tasky**.
 
-Launching `Tasky.exe` while it's already running opens its settings.
+**Ctrl + Alt + D** shows a hidden dock (it can be turned off in settings). Launching `Tasky.exe` while it's already running opens its settings.
 
 ## Settings
 
 | Section | Options |
 | --- | --- |
 | Size | Icon size, space between icons, magnify on hover, magnification amount |
-| Look | Corner roundness, background opacity, blur, clock size, distance from the screen edge |
-| Behavior | Dock mode (below), show tray icons, hide the Windows taskbar, start with Windows |
+| Look | Theme (match Windows, dark, light), corner roundness, background opacity, blur, clock size, distance from the screen edge, animation speed |
+| Behavior | Dock mode (below), reveal delay, which display the dock is on, the Ctrl + Alt + D shortcut, show tray icons, hide the Windows taskbar, start with Windows, Start menu shortcut |
+| About | Version, a link to this page, and the folder with Tasky's settings |
 
 **Dock modes**
 
@@ -96,7 +101,9 @@ With blur on, Windows only allows square, 4 px or 8 px corners on the blurred ar
 
 ## Known limitations
 
-- Primary monitor only.
+- One dock, on one display (choose which in settings). Hiding the Windows taskbar only hides it on the main display.
+- The dock sits at the bottom of the screen; left, right and top aren't supported yet.
+- Right-click menus show an app's recent files, but not the custom tasks some apps add to their jump lists (Windows only shares those with its own taskbar).
 - While Tasky shows the tray, other apps that reserve screen space the way the taskbar does (other docks and toolbars) can't.
 - Tray icons of apps running as administrator only respond if Tasky also runs as administrator.
 - Tray icons from apps that were already running appear once the app re-adds them; restart any that don't show up.
@@ -117,12 +124,16 @@ dotnet run -- --settings
 
 | File | What it does |
 | --- | --- |
-| `MainWindow.xaml(.cs)` | The dock: layout, magnification, auto-hide, clicks, menus, tray UI |
+| `MainWindow.xaml(.cs)` | The dock: layout, magnification, auto-hide, clicks, drag to reorder, menus, tray UI |
+| `PreviewWindow.cs` | Live window previews (DWM thumbnails) |
+| `StatusMonitor.cs` | Wi-Fi, volume and battery state for the status icons |
+| `JumpList.cs` | Apps' recent documents |
+| `Theme.cs` | Dark and light colours |
 | `WindowEnumerator.cs` | Finds taskbar-worthy windows and groups them by app |
 | `IconLoader.cs` | High-quality app icons at every size the dock draws |
 | `BackdropWindow.cs` | The blur behind the dock |
 | `TrayHost.cs` | The system tray, via [ManagedShell](https://github.com/cairoshell/ManagedShell) |
-| `Shell.cs` | Reserving screen space, hiding the Windows taskbar, start with Windows |
+| `Shell.cs` | Reserving screen space, hiding the Windows taskbar, start with Windows, Start menu shortcut |
 | `SettingsWindow.xaml(.cs)` | The settings window |
 
 ## Licence

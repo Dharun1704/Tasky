@@ -26,6 +26,7 @@ public partial class App : Application
 
         base.OnStartup(e);
         AutoStart.Repair();
+        StartMenuShortcut.Repair();
         ThreadPool.RegisterWaitForSingleObject(showSettings,
             (_, _) => Dispatcher.InvokeAsync(() => dock?.OpenSettings()), null, Timeout.Infinite, executeOnlyOnce: false);
 

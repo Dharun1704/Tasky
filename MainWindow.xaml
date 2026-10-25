@@ -1,4 +1,4 @@
-﻿<Window x:Class="Tasky.MainWindow"
+<Window x:Class="Tasky.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:Tasky"
@@ -14,7 +14,7 @@
                 <TranslateTransform x:Name="DockSlide"/>
             </Grid.RenderTransform>
             <Border x:Name="Pill" VerticalAlignment="Bottom" CornerRadius="18"
-                    BorderBrush="#2EFFFFFF" BorderThickness="1"
+                    BorderBrush="{DynamicResource T.Stroke}" BorderThickness="1"
                     MouseRightButtonUp="OnDockRightClick">
                 <Border.Background>
                     <SolidColorBrush x:Name="PillBrush" Color="#202020" Opacity="0.7"/>
@@ -45,12 +45,13 @@
                     </Viewbox>
                 </Border>
 
-                <Rectangle x:Name="SepLeft" Width="1" Fill="#33FFFFFF" VerticalAlignment="Bottom" Margin="6,0"/>
+                <Rectangle x:Name="SepLeft" Width="1" Fill="{DynamicResource T.Sep}" VerticalAlignment="Bottom" Margin="6,0"/>
 
                 <!-- Apps -->
                 <ItemsControl x:Name="Apps" VerticalAlignment="Bottom"
                               MouseMove="OnAppsMouseMove" MouseLeave="OnAppsMouseLeave"
-                              PreviewMouseUp="OnAppsMouseUp">
+                              PreviewMouseUp="OnAppsMouseUp" PreviewMouseLeftButtonDown="OnAppsMouseDown"
+                              LostMouseCapture="OnAppsLostCapture">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom"/>
@@ -67,11 +68,11 @@
                                        RenderOptions.BitmapScalingMode="HighQuality"/>
                                 <Border x:Name="Indicator" Width="5" Height="4" CornerRadius="2"
                                         VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,2"
-                                        Background="#B3FFFFFF" Opacity="0"/>
+                                        Background="{DynamicResource T.Indicator}" Opacity="0"/>
                             </Grid>
                             <DataTemplate.Triggers>
                                 <DataTrigger Binding="{Binding IsHovered}" Value="True">
-                                    <Setter TargetName="Hover" Property="Background" Value="#14FFFFFF"/>
+                                    <Setter TargetName="Hover" Property="Background" Value="{DynamicResource T.ItemHover}"/>
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding IsRunning}" Value="True">
                                     <Setter TargetName="Indicator" Property="Opacity" Value="1"/>
@@ -89,14 +90,14 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <Rectangle x:Name="SepRight" Width="1" Fill="#33FFFFFF" VerticalAlignment="Bottom" Margin="6,0"/>
+                <Rectangle x:Name="SepRight" Width="1" Fill="{DynamicResource T.Sep}" VerticalAlignment="Bottom" Margin="6,0"/>
 
                 <!-- System tray: an overflow chevron, then the icons pinned to the dock -->
                 <StackPanel x:Name="TrayArea" Orientation="Horizontal" VerticalAlignment="Bottom">
                     <Border x:Name="TrayMore" Style="{StaticResource DockButton}" Width="{DynamicResource TraySlot}"
                             VerticalAlignment="Stretch" MouseLeftButtonUp="OnTrayMoreClick" MouseRightButtonUp="OnDockRightClick">
                         <TextBlock x:Name="TrayMoreGlyph" Text="&#xE70E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                                   Foreground="#E6FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                   Foreground="{DynamicResource T.Glyph}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <ItemsControl x:Name="TrayPinned" VerticalAlignment="Stretch">
                         <ItemsControl.ItemsPanel>
@@ -120,30 +121,35 @@
 
                 <!-- Status capsule: Quick Settings (wifi, volume, battery) and the clock, grouped like a
                      status bar so the right end reads as one tidy unit -->
-                <Border x:Name="StatusCapsule" VerticalAlignment="Bottom" Background="#12FFFFFF"
-                        BorderBrush="#14FFFFFF" BorderThickness="1">
+                <Border x:Name="StatusCapsule" VerticalAlignment="Bottom" Background="{DynamicResource T.CapsuleBg}"
+                        BorderBrush="{DynamicResource T.CapsuleStroke}" BorderThickness="1">
                     <StackPanel Orientation="Horizontal">
                         <Border x:Name="QuickSettings" Style="{StaticResource DockButton}"
-                                MouseLeftButtonUp="OnQuickSettingsClick" MouseRightButtonUp="OnDockRightClick">
+                                MouseLeftButtonUp="OnQuickSettingsClick" MouseRightButtonUp="OnDockRightClick"
+                                MouseEnter="OnStatusMouseEnter" MouseLeave="OnStatusMouseLeave">
                             <StackPanel x:Name="QuickGlyphs" Orientation="Horizontal" VerticalAlignment="Center">
                                 <StackPanel.Resources>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
-                                        <Setter Property="Foreground" Value="#E6FFFFFF"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource T.Glyph}"/>
                                         <Setter Property="VerticalAlignment" Value="Center"/>
                                     </Style>
                                 </StackPanel.Resources>
-                                <TextBlock Text="&#xE701;"/>
-                                <TextBlock Text="&#xE767;"/>
+                                <!-- Wi-Fi bars are drawn over a faint full-wifi glyph, as Windows does -->
+                                <Grid>
+                                    <TextBlock x:Name="WifiBack" Text="&#xE701;" Opacity="0.3"/>
+                                    <TextBlock x:Name="WifiGlyph" Text="&#xE701;"/>
+                                </Grid>
+                                <TextBlock x:Name="VolumeGlyph" Text="&#xE767;"/>
                                 <TextBlock x:Name="BatteryGlyph" Text="&#xE83F;"/>
                             </StackPanel>
                         </Border>
-                        <Rectangle x:Name="StatusDivider" Width="1" Fill="#26FFFFFF" VerticalAlignment="Center"/>
+                        <Rectangle x:Name="StatusDivider" Width="1" Fill="{DynamicResource T.Divider}" VerticalAlignment="Center"/>
                         <Border x:Name="Clock" Style="{StaticResource DockButton}"
                                 MouseLeftButtonUp="OnClockClick" MouseRightButtonUp="OnDockRightClick">
                             <StackPanel VerticalAlignment="Center">
-                                <TextBlock x:Name="ClockTime" Foreground="White" FontWeight="SemiBold" HorizontalAlignment="Right"/>
-                                <TextBlock x:Name="ClockDate" Foreground="#B3FFFFFF" HorizontalAlignment="Right" Margin="0,-1,0,0"/>
+                                <TextBlock x:Name="ClockTime" Foreground="{DynamicResource T.Fg}" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                                <TextBlock x:Name="ClockDate" Foreground="{DynamicResource T.Sub}" HorizontalAlignment="Right" Margin="0,-1,0,0"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -153,7 +159,7 @@
                 <Border x:Name="SettingsButton" Style="{StaticResource DockButton}" VerticalAlignment="Bottom"
                         MouseLeftButtonUp="OnSettingsClick" MouseRightButtonUp="OnDockRightClick">
                     <TextBlock x:Name="SettingsGlyph" Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                               Foreground="#E6FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                               Foreground="{DynamicResource T.Glyph}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
             </StackPanel>
         </Grid>
@@ -161,12 +167,12 @@
         <!-- Every tray icon; pin one to keep it on the dock -->
         <Popup x:Name="TrayPopup" PlacementTarget="{Binding ElementName=TrayMore}" Placement="Top" StaysOpen="True"
                AllowsTransparency="True" PopupAnimation="Fade" Opened="OnTrayPopupOpened" Closed="OnTrayPopupClosed">
-            <Border Margin="10" Padding="6" CornerRadius="8" Background="#F2262626" BorderBrush="#33FFFFFF" BorderThickness="1">
+            <Border Margin="10" Padding="6" CornerRadius="8" Background="{DynamicResource T.MenuBg}" BorderBrush="{DynamicResource T.MenuStroke}" BorderThickness="1">
                 <Border.Effect>
                     <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.45"/>
                 </Border.Effect>
                 <StackPanel Width="206">
-                    <TextBlock Text="Tray icons" Foreground="#B3FFFFFF" FontSize="12" Margin="6,2,6,6"
+                    <TextBlock Text="Tray icons" Foreground="{DynamicResource T.Sub}" FontSize="12" Margin="6,2,6,6"
                                FontFamily="{StaticResource UiFont}"/>
                     <ItemsControl x:Name="TrayAll">
                         <ItemsControl.ItemsPanel>
@@ -188,7 +194,7 @@
                                             ToolTip="Pin to dock"
                                             MouseLeftButtonDown="OnTrayPinDown" MouseLeftButtonUp="OnTrayPinClick">
                                         <TextBlock x:Name="PinGlyph" Text="&#xE718;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                                                   FontSize="11" Foreground="#CCFFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                   FontSize="11" Foreground="{DynamicResource T.PinGlyph}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     </Border>
                                 </Grid>
                                 <DataTemplate.Triggers>
@@ -206,7 +212,7 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                     <TextBlock x:Name="TrayEmpty" Text="No tray icons yet. Apps add theirs as they start."
-                               Foreground="#99FFFFFF" FontSize="12" TextWrapping="Wrap" Margin="6,4"
+                               Foreground="{DynamicResource T.Faint}" FontSize="12" TextWrapping="Wrap" Margin="6,4"
                                FontFamily="{StaticResource UiFont}"/>
                 </StackPanel>
             </Border>
@@ -215,8 +221,8 @@
         <!-- Floating name label over the hovered icon -->
         <Canvas IsHitTestVisible="False">
             <Border x:Name="NameLabel" Visibility="Collapsed" CornerRadius="6" Padding="9,4"
-                    Background="#EB262626" BorderBrush="#33FFFFFF" BorderThickness="1">
-                <TextBlock x:Name="NameLabelText" Foreground="White" FontSize="12"/>
+                    Background="{DynamicResource T.LabelBg}" BorderBrush="{DynamicResource T.MenuStroke}" BorderThickness="1">
+                <TextBlock x:Name="NameLabelText" Foreground="{DynamicResource T.Fg}" FontSize="12"/>
             </Border>
         </Canvas>
     </Grid>

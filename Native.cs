@@ -138,6 +138,35 @@ internal static class Native
     [DllImport("user32.dll")] public static extern int GetDoubleClickTime();
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromPoint(POINT pt, uint flags);
     [DllImport("user32.dll")] public static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct MONITORINFOEX
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szDevice;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMonitorInfoW")]
+    public static extern bool GetMonitorInfoEx(IntPtr monitor, ref MONITORINFOEX info);
+
+    public delegate bool MonitorEnumProc(IntPtr monitor, IntPtr dc, ref RECT rect, IntPtr data);
+    [DllImport("user32.dll")] public static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonitorEnumProc proc, IntPtr data);
+
+    /// <summary>Every display: its device name (e.g. \\.\DISPLAY1), bounds, work area and whether it's the main one.</summary>
+    public static List<(IntPtr Handle, string Device, RECT Bounds, RECT Work, bool Primary)> Monitors()
+    {
+        var list = new List<(IntPtr, string, RECT, RECT, bool)>();
+        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr m, IntPtr _, ref RECT _, IntPtr _) =>
+        {
+            var info = new MONITORINFOEX { cbSize = Marshal.SizeOf<MONITORINFOEX>() };
+            if (GetMonitorInfoEx(m, ref info)) list.Add((m, info.szDevice, info.rcMonitor, info.rcWork, (info.dwFlags & 1) != 0));
+            return true;
+        }, IntPtr.Zero);
+        return list;
+    }
     [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
     [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr h, IntPtr dc);

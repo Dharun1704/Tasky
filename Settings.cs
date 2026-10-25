@@ -25,6 +25,16 @@ internal sealed class Settings
     public bool AutoHide { get; set; } = true;
     public bool HideTaskbar { get; set; }
     public bool ShowTray { get; set; } = true;
+    /// <summary>Device name of the display the dock lives on (e.g. \\.\DISPLAY2); null means the main display.</summary>
+    public string? Monitor { get; set; }
+    /// <summary>"System", "Dark" or "Light".</summary>
+    public string Theme { get; set; } = "System";
+    /// <summary>How long the mouse must rest at the screen edge before a hidden dock appears, in ms.</summary>
+    public int RevealDelay { get; set; } = 0;
+    /// <summary>Multiplier for slide, fade and magnify animations (higher is faster).</summary>
+    public double AnimationSpeed { get; set; } = 1.0;
+    /// <summary>Ctrl+Alt+D shows the dock (and hides it again in auto-hide mode).</summary>
+    public bool ShowHotkey { get; set; } = true;
     /// <summary>Identifiers of tray icons pinned to the dock; null means ManagedShell's defaults.</summary>
     public List<string>? TrayPins { get; set; }
 

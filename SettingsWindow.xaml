@@ -125,6 +125,13 @@
                 <StackPanel>
                     <TextBlock Text="Look" Style="{StaticResource CardTitle}"/>
 
+                    <TextBlock Text="Theme" Style="{StaticResource RowLabel}" Margin="0,4,0,4"/>
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton x:Name="ThemeSystem" GroupName="Theme" Content="Match Windows" Style="{StaticResource Choice}" Margin="0,4,22,4"/>
+                        <RadioButton x:Name="ThemeDark" GroupName="Theme" Content="Dark" Style="{StaticResource Choice}" Margin="0,4,22,4"/>
+                        <RadioButton x:Name="ThemeLight" GroupName="Theme" Content="Light" Style="{StaticResource Choice}"/>
+                    </StackPanel>
+
                     <Grid>
                         <TextBlock Text="Corner roundness" Style="{StaticResource RowLabel}"/>
                         <TextBlock x:Name="RoundnessValue" Style="{StaticResource RowValue}"/>
@@ -152,6 +159,12 @@
                         <TextBlock x:Name="GapValue" Style="{StaticResource RowValue}"/>
                     </Grid>
                     <Slider x:Name="EdgeGap" Minimum="0" Maximum="40" TickFrequency="1" IsSnapToTickEnabled="True"/>
+
+                    <Grid>
+                        <TextBlock Text="Animation speed" Style="{StaticResource RowLabel}"/>
+                        <TextBlock x:Name="SpeedValue" Style="{StaticResource RowValue}"/>
+                    </Grid>
+                    <Slider x:Name="AnimationSpeed" Minimum="0.5" Maximum="2" TickFrequency="0.1" IsSnapToTickEnabled="True"/>
                 </StackPanel>
             </Border>
 
@@ -178,10 +191,40 @@
                         </StackPanel>
                     </RadioButton>
 
+                    <Grid>
+                        <TextBlock Text="Reveal delay at the screen edge" Style="{StaticResource RowLabel}"/>
+                        <TextBlock x:Name="RevealValue" Style="{StaticResource RowValue}"/>
+                    </Grid>
+                    <Slider x:Name="RevealDelay" Minimum="0" Maximum="800" TickFrequency="50" IsSnapToTickEnabled="True"/>
+                    <TextBlock Text="A short delay stops the dock popping up when you only brush the bottom edge."
+                               Style="{StaticResource Hint}"/>
+
                     <Rectangle Height="1" Fill="#14FFFFFF" Margin="0,10"/>
+                    <TextBlock Text="Show the dock on" Margin="0,0,0,2"/>
+                    <StackPanel x:Name="MonitorChoices"/>
+
+                    <Rectangle Height="1" Fill="#14FFFFFF" Margin="0,10"/>
+                    <CheckBox x:Name="ShowHotkey" Content="Ctrl + Alt + D shows the dock" Style="{StaticResource ToggleSwitch}"/>
                     <CheckBox x:Name="ShowTray" Content="Show tray icons" Style="{StaticResource ToggleSwitch}"/>
                     <CheckBox x:Name="HideTaskbar" Content="Hide the Windows taskbar" Style="{StaticResource ToggleSwitch}"/>
                     <CheckBox x:Name="AutoStart" Content="Start with Windows" Style="{StaticResource ToggleSwitch}"/>
+                    <CheckBox x:Name="StartMenu" Content="Show Tasky in the Start menu" Style="{StaticResource ToggleSwitch}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- About -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="About" Style="{StaticResource CardTitle}"/>
+                    <TextBlock x:Name="VersionText" FontSize="13"/>
+                    <TextBlock Text="A floating dock for Windows 11." Style="{StaticResource Hint}" Margin="0,4,0,0"/>
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,2,0,0">
+                        Free software under the GNU GPL v3. Tray support by ManagedShell (Apache 2.0).
+                    </TextBlock>
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button Content="Project on GitHub" Style="{StaticResource SubtleButton}" Click="OnGitHub"/>
+                        <Button Content="Open data folder" Style="{StaticResource SubtleButton}" Margin="8,0,0,0" Click="OnDataFolder"/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
