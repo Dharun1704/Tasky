@@ -305,7 +305,7 @@ public partial class MainWindow : Window
                             && pt.Y >= pillRect.Top - reach && pt.Y <= work.Bottom;
             hide = !atEdge && !overDock && DateTime.UtcNow >= revealedByHotkeyUntil && WindowOverlapsDock();
         }
-        SetAutoHidden(hide);
+        SetAutoHidden(HideAfterDelay(hide));
         AlignShellFlyout();
     }
 
@@ -431,6 +431,20 @@ public partial class MainWindow : Window
 
     /// <summary>An animation length scaled by the animation-speed setting.</summary>
     TimeSpan Duration(double ms) => TimeSpan.FromMilliseconds(ms / Math.Clamp(settings.AnimationSpeed, 0.25, 4));
+
+    DateTime? hideWantedSince;
+
+    /// <summary>Holds a hide back until it has been wanted for the hide delay (showing is never delayed here).</summary>
+    bool HideAfterDelay(bool hide)
+    {
+        if (!hide || autoHidden)
+        {
+            hideWantedSince = null;
+            return hide;
+        }
+        hideWantedSince ??= DateTime.UtcNow;
+        return DateTime.UtcNow - hideWantedSince.Value >= TimeSpan.FromMilliseconds(settings.HideDelay);
+    }
 
     DateTime? edgeSince;
 
@@ -701,14 +715,27 @@ public partial class MainWindow : Window
         catch { return null; }
     }
 
+    /// <summary>
+    /// Descriptions that name the framework an app is built on rather than the app: Electron apps
+    /// (GitHub Desktop, Discord…) often ship with "Electron" as their file description.
+    /// </summary>
+    static readonly HashSet<string> FrameworkNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Electron", "Chromium", "Google Chrome", "CefSharp", "NW.js", "Node.js", "Tauri App",
+        "Java(TM) Platform SE binary", "OpenJDK Platform binary", "Python", "Qt",
+    };
+
     static string DisplayName(string path)
     {
         try
         {
             if (path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(path))
             {
-                var description = FileVersionInfo.GetVersionInfo(path).FileDescription;
-                if (!string.IsNullOrWhiteSpace(description)) return description.Trim();
+                var info = FileVersionInfo.GetVersionInfo(path);
+                // The file description is what the taskbar shows; fall back to the product name when the
+                // description is just the framework's placeholder.
+                foreach (var name in new[] { info.FileDescription, info.ProductName })
+                    if (!string.IsNullOrWhiteSpace(name) && !FrameworkNames.Contains(name.Trim())) return name.Trim();
             }
         }
         catch { }
@@ -882,12 +909,12 @@ public partial class MainWindow : Window
 
     void OnAppsMouseDown(object sender, MouseButtonEventArgs e)
     {
-        dragItem = (e.OriginalSource as FrameworkElement)?.DataContext is DockItem { IsPinned: true } item ? item : null;
+        dragItem = (e.OriginalSource as FrameworkElement)?.DataContext as DockItem;
         dragStart = e.GetPosition(Apps);
         dragging = false;
     }
 
-    /// <summary>Handles a move while a pinned icon is held; true once it has become a drag.</summary>
+    /// <summary>Handles a move while an icon is held; true once it has become a drag.</summary>
     bool DragApp(MouseEventArgs e)
     {
         var p = e.GetPosition(Apps);
@@ -910,20 +937,40 @@ public partial class MainWindow : Window
             double x = e.GetPosition(c).X;
             if (x < 0 || x >= c.ActualWidth) continue;
             var target = items[i];
-            if (target != dragItem && target.IsPinned) MovePinnedApp(dragItem!, target);
+            if (target != dragItem) MoveApp(dragItem!, target);
             break;
         }
         return true;
     }
 
-    void MovePinnedApp(DockItem item, DockItem target)
+    int PinIndex(DockItem item) => settings.Pins.FindIndex(p => PinKey(p).Equals(item.Key, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Moves <paramref name="item"/> to where <paramref name="target"/> is. Pinned apps always come
+    /// first, so: pinned among pinned reorders the pins; running among running reorders them for as
+    /// long as they stay open; a running app dropped among the pinned ones gets pinned right there.
+    /// </summary>
+    void MoveApp(DockItem item, DockItem target)
     {
-        int from = settings.Pins.FindIndex(p => PinKey(p).Equals(item.Key, StringComparison.OrdinalIgnoreCase));
-        int to = settings.Pins.FindIndex(p => PinKey(p).Equals(target.Key, StringComparison.OrdinalIgnoreCase));
-        if (from < 0 || to < 0) return;
-        var pin = settings.Pins[from];
-        settings.Pins.RemoveAt(from);
-        settings.Pins.Insert(to, pin);
+        if (item.IsPinned && target.IsPinned)
+        {
+            int from = PinIndex(item), to = PinIndex(target);
+            if (from < 0 || to < 0) return;
+            var pin = settings.Pins[from];
+            settings.Pins.RemoveAt(from);
+            settings.Pins.Insert(to, pin);
+        }
+        else if (!item.IsPinned && target.IsPinned)
+        {
+            int to = PinIndex(target);
+            if (to < 0) return;
+            settings.Pins.Insert(to, item.LaunchPath);
+            item.IsPinned = true;
+        }
+        else if (item.IsPinned && !target.IsPinned)
+        {
+            return; // pinned apps stay in front of the running-only ones
+        }
         items.Move(items.IndexOf(item), items.IndexOf(target));
     }
 

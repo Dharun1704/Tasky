@@ -31,6 +31,8 @@ internal sealed class Settings
     public string Theme { get; set; } = "System";
     /// <summary>How long the mouse must rest at the screen edge before a hidden dock appears, in ms.</summary>
     public int RevealDelay { get; set; } = 0;
+    /// <summary>How long a shown dock waits, once the mouse has left it, before sliding away, in ms.</summary>
+    public int HideDelay { get; set; } = 0;
     /// <summary>Multiplier for slide, fade and magnify animations (higher is faster).</summary>
     public double AnimationSpeed { get; set; } = 1.0;
     /// <summary>Ctrl+Alt+D shows the dock (and hides it again in auto-hide mode).</summary>

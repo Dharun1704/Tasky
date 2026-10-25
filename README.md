@@ -82,7 +82,7 @@ Settings, pins and an error log are kept in `%APPDATA%\Tasky`.
 | --- | --- |
 | Size | Icon size, space between icons, magnify on hover, magnification amount |
 | Look | Theme (match Windows, dark, light), corner roundness, background opacity, blur, clock size, distance from the screen edge, animation speed |
-| Behavior | Dock mode (below), reveal delay, which display the dock is on, the Ctrl + Alt + D shortcut, show tray icons, hide the Windows taskbar, start with Windows, Start menu shortcut |
+| Behavior | Dock mode (below), reveal delay, hide delay, which display the dock is on, the Ctrl + Alt + D shortcut, show tray icons, hide the Windows taskbar, start with Windows, Start menu shortcut |
 | About | Version, a link to this page, and the folder with Tasky's settings |
 
 **Dock modes**

@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Threading;
@@ -51,6 +51,7 @@ public partial class SettingsWindow : Window
         EdgeGap.Value = settings.EdgeGap;
         AnimationSpeed.Value = settings.AnimationSpeed;
         RevealDelay.Value = settings.RevealDelay;
+        HideDelay.Value = settings.HideDelay;
         ShowHotkey.IsChecked = settings.ShowHotkey;
         ThemeSystem.IsChecked = settings.Theme is not ("Dark" or "Light");
         ThemeDark.IsChecked = settings.Theme == "Dark";
@@ -115,6 +116,12 @@ public partial class SettingsWindow : Window
         Look(EdgeGap, v => settings.EdgeGap = v);
         Look(ClockSize, v => settings.ClockFontSize = v);
         Look(AnimationSpeed, v => settings.AnimationSpeed = Math.Round(v, 1));
+        HideDelay.ValueChanged += (_, e) =>
+        {
+            if (loading) return;
+            settings.HideDelay = (int)e.NewValue;
+            Changed(look: false);
+        };
         RevealDelay.ValueChanged += (_, e) =>
         {
             if (loading) return;
@@ -190,6 +197,7 @@ public partial class SettingsWindow : Window
         ClockSizeValue.Text = $"{settings.ClockFontSize:0.#} px";
         SpeedValue.Text = $"{settings.AnimationSpeed:0.0}×";
         RevealValue.Text = settings.RevealDelay == 0 ? "Instant" : $"{settings.RevealDelay} ms";
+        HideValue.Text = settings.HideDelay == 0 ? "Instant" : $"{settings.HideDelay / 1000.0:0.0} s";
     }
 
     void OnReset(object sender, RoutedEventArgs e)
