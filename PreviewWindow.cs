@@ -56,8 +56,11 @@ internal sealed class PreviewWindow : Window
         Native.DwmSetWindowAttribute(hwnd, Native.DWMWA_BORDER_COLOR, ref border, sizeof(int));
     }
 
-    /// <summary>Shows previews of <paramref name="windows"/> centred above <paramref name="anchorTopCenter"/> (screen px).</summary>
-    public void ShowFor(IReadOnlyList<AppWindow> windows, ImageSource? icon, Point anchorTopCenter, IntPtr owner)
+    /// <summary>
+    /// Shows previews of <paramref name="windows"/> next to <paramref name="anchor"/> (screen px): the
+    /// point on the dock's screen-facing side level with the icon. They open away from <paramref name="edge"/>.
+    /// </summary>
+    public void ShowFor(IReadOnlyList<AppWindow> windows, ImageSource? icon, Point anchor, DockEdge edge, IntPtr owner)
     {
         ClearThumbs();
         cards.Children.Clear();
@@ -74,12 +77,19 @@ internal sealed class PreviewWindow : Window
         UpdateLayout();
         var dpi = VisualTreeHelper.GetDpi(this);
         double width = ActualWidth * dpi.DpiScaleX, height = ActualHeight * dpi.DpiScaleY;
-        var mon = Native.MonitorFromPoint(new Native.POINT { X = (int)anchorTopCenter.X, Y = (int)anchorTopCenter.Y }, 2 /* NEAREST */);
+        var mon = Native.MonitorFromPoint(new Native.POINT { X = (int)anchor.X, Y = (int)anchor.Y }, 2 /* NEAREST */);
         var info = new Native.MONITORINFO { cbSize = Marshal.SizeOf<Native.MONITORINFO>() };
         Native.GetMonitorInfo(mon, ref info);
         var screen = info.rcMonitor;
-        double x = Math.Clamp(anchorTopCenter.X - width / 2, screen.Left + 8, Math.Max(screen.Left + 8, screen.Right - width - 8));
-        double y = anchorTopCenter.Y - height - 10;
+        double ClampX(double v) => Math.Clamp(v, screen.Left + 8, Math.Max(screen.Left + 8, screen.Right - width - 8));
+        double ClampY(double v) => Math.Clamp(v, screen.Top + 8, Math.Max(screen.Top + 8, screen.Bottom - height - 8));
+        var (x, y) = edge switch
+        {
+            DockEdge.Top => (ClampX(anchor.X - width / 2), anchor.Y + 10),
+            DockEdge.Left => (anchor.X + 10, ClampY(anchor.Y - height / 2)),
+            DockEdge.Right => (anchor.X - width - 10, ClampY(anchor.Y - height / 2)),
+            _ => (ClampX(anchor.X - width / 2), anchor.Y - height - 10),
+        };
         Native.SetWindowPos(hwnd, IntPtr.Zero, (int)x, (int)y, 0, 0, Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
         PlaceThumbnails();
     }

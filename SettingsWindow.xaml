@@ -208,7 +208,15 @@
                                Style="{StaticResource Hint}"/>
 
                     <Rectangle Height="1" Fill="#14FFFFFF" Margin="0,10"/>
-                    <TextBlock Text="Show the dock on" Margin="0,0,0,2"/>
+                    <TextBlock Text="Screen edge" Margin="0,0,0,2"/>
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton x:Name="EdgeBottom" GroupName="Edge" Content="Bottom" Style="{StaticResource Choice}" Margin="0,4,22,4"/>
+                        <RadioButton x:Name="EdgeTop" GroupName="Edge" Content="Top" Style="{StaticResource Choice}" Margin="0,4,22,4"/>
+                        <RadioButton x:Name="EdgeLeft" GroupName="Edge" Content="Left" Style="{StaticResource Choice}" Margin="0,4,22,4"/>
+                        <RadioButton x:Name="EdgeRight" GroupName="Edge" Content="Right" Style="{StaticResource Choice}"/>
+                    </StackPanel>
+
+                    <TextBlock Text="Show the dock on" Margin="0,10,0,2"/>
                     <StackPanel x:Name="MonitorChoices"/>
 
                     <Rectangle Height="1" Fill="#14FFFFFF" Margin="0,10"/>

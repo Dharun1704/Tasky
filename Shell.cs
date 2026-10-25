@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace Tasky;
@@ -100,8 +100,8 @@ internal sealed class AppBar(uint callbackMessage)
     IntPtr hwnd;
     bool registered;
 
-    /// <summary>Reserves <paramref name="height"/> px at the bottom of the monitor; returns the reserved bottom edge.</summary>
-    public int Reserve(IntPtr window, Native.RECT monitor, int height)
+    /// <summary>Reserves a <paramref name="thickness"/> px strip along one edge of the monitor; returns the strip.</summary>
+    public Native.RECT Reserve(IntPtr window, Native.RECT monitor, int thickness, DockEdge edge)
     {
         hwnd = window;
         var abd = Data();
@@ -112,12 +112,25 @@ internal sealed class AppBar(uint callbackMessage)
             registered = true;
         }
 
-        abd.uEdge = Native.ABE_BOTTOM;
-        abd.rc = new Native.RECT { Left = monitor.Left, Right = monitor.Right, Bottom = monitor.Bottom, Top = monitor.Bottom - height };
-        ExplorerAppBar.Send(Native.ABM_QUERYPOS, ref abd); // moves the rect above the Windows taskbar if it's showing
-        abd.rc.Top = abd.rc.Bottom - height;
+        abd.uEdge = edge.AppBarEdge();
+        abd.rc = monitor;
+        Strip(ref abd.rc, edge, thickness);
+        ExplorerAppBar.Send(Native.ABM_QUERYPOS, ref abd); // moves the strip clear of the Windows taskbar if it's showing
+        Strip(ref abd.rc, edge, thickness);
         ExplorerAppBar.Send(Native.ABM_SETPOS, ref abd);
-        return abd.rc.Bottom;
+        return abd.rc;
+    }
+
+    /// <summary>Narrows <paramref name="rc"/> to the strip of <paramref name="thickness"/> on its <paramref name="edge"/> side.</summary>
+    static void Strip(ref Native.RECT rc, DockEdge edge, int thickness)
+    {
+        switch (edge)
+        {
+            case DockEdge.Top: rc.Bottom = rc.Top + thickness; break;
+            case DockEdge.Left: rc.Right = rc.Left + thickness; break;
+            case DockEdge.Right: rc.Left = rc.Right - thickness; break;
+            default: rc.Top = rc.Bottom - thickness; break;
+        }
     }
 
     public void Release()

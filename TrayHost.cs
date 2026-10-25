@@ -14,6 +14,7 @@ internal sealed class TrayHost(Settings settings)
 {
     TrayService? service;
     Native.RECT placed;
+    DockEdge placedEdge;
 
     public NotificationArea? Area { get; private set; }
 
@@ -164,13 +165,14 @@ internal sealed class TrayHost(Settings settings)
     }
 
     /// <summary>Tells apps where the tray is (screen pixels) so their menus and flyouts open beside the dock.</summary>
-    public void SetPlacement(Native.RECT r)
+    public void SetPlacement(Native.RECT r, DockEdge dockEdge)
     {
-        if (Area == null || (r.Left == placed.Left && r.Top == placed.Top && r.Right == placed.Right && r.Bottom == placed.Bottom)) return;
+        if (Area == null || (dockEdge == placedEdge && r.Left == placed.Left && r.Top == placed.Top && r.Right == placed.Right && r.Bottom == placed.Bottom)) return;
         placed = r;
+        placedEdge = dockEdge;
         Area.SetTrayHostSizeData(new TrayHostSizeData
         {
-            edge = NativeMethods.ABEdge.ABE_BOTTOM,
+            edge = (NativeMethods.ABEdge)dockEdge.AppBarEdge(),
             rc = new NativeMethods.Rect { Left = r.Left, Top = r.Top, Right = r.Right, Bottom = r.Bottom },
         });
     }

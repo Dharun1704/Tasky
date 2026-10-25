@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -18,7 +19,12 @@ namespace Tasky;
 public partial class MainWindow : Window
 {
     const double MagnifyRange = 2.2;  // how many neighbouring icons the magnify wave reaches
-    const double Headroom = 44;       // room above magnified icons for the name label and launch bounce
+    const double LabelRoom = 44;      // room beyond magnified icons for the name label and launch bounce
+
+    DockEdge Edge => DockEdges.Parse(settings.Position);
+    bool Vertical => Edge.IsVertical();
+    // Beside a side dock the name label sits next to the icon, so the window needs room for its width.
+    double Headroom => Vertical ? 260 : LabelRoom;
 
     readonly Settings settings = Settings.Load();
     readonly ObservableCollection<DockItem> items = new();
@@ -59,7 +65,24 @@ public partial class MainWindow : Window
 
     // Tall enough for the icons, and for the two-line clock (time over date, ~1.33 line height each)
     // inside its capsule, which sits 14 DIPs inside the pill.
-    double PillHeight => Math.Max(Math.Max(BaseSize + 16, 46), Math.Ceiling((settings.ClockFontSize + DateFontSize) * 1.33 + 18));
+    // On a side dock the clock's width matters instead: time and short date side by side in a column.
+    // ("PillHeight" is the dock's thickness across, whichever edge it's on.)
+    double PillHeight => Vertical
+        ? Math.Max(Math.Max(BaseSize + 16, 46), Math.Ceiling(ClockTextWidth() + 24))
+        : Math.Max(Math.Max(BaseSize + 16, 46), Math.Ceiling((settings.ClockFontSize + DateFontSize) * 1.33 + 18));
+
+    /// <summary>Width of the widest time ("23:58") and short date ("28 Sep") at the clock's sizes.</summary>
+    double ClockTextWidth()
+    {
+        double Measure(string text, double size, FontWeight weight) => new FormattedText(text, CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight, new Typeface(FontFamily, FontStyles.Normal, weight, FontStretches.Normal), size,
+            Brushes.Black, VisualTreeHelper.GetDpi(this).PixelsPerDip).Width;
+        var sample = new DateTime(2000, 9, 28, 23, 58, 0);
+        return Math.Max(Measure(sample.ToString("t"), settings.ClockFontSize, FontWeights.SemiBold),
+                        Measure(sample.ToString(ShortDateFormat), DateFontSize, FontWeights.Normal));
+    }
+
+    const string ShortDateFormat = "d MMM";
 
     public MainWindow()
     {
@@ -157,7 +180,7 @@ public partial class MainWindow : Window
 
     void ApplyLayout()
     {
-        Pill.Height = PillHeight;
+        ApplyOrientation();
         // With blur the pill wraps the blur window's DWM corners (+1 for the border it sits inside).
         double radius = Math.Min(settings.CornerRadius, PillHeight / 2);
         if (settings.Blur) radius = backdrop.SetCorners(radius) is var used && used > 0 ? used + 1 : 0;
@@ -171,43 +194,56 @@ public partial class MainWindow : Window
         pillShadow ??= Pill.Effect;
         Pill.Effect = settings.Blur ? null : pillShadow;
 
+        var edge = Edge;
+        bool vertical = edge.IsVertical();
+        // Sizes are written as for a bottom dock: "across" is the thickness, "along" the icons' direction.
+        void SetSize(FrameworkElement el, double across, double along)
+        {
+            el.Width = vertical ? across : along;
+            el.Height = vertical ? along : across;
+        }
+
         double button = PillHeight - 8;
-        StartButton.Width = StartButton.Height = button;
-        StartButton.Margin = new Thickness(0, 0, 0, 4);
+        SetSize(StartButton, button, button);
+        StartButton.Margin = edge.Margin(0, 0, 4);
         StartIcon.Margin = new Thickness((button - BaseSize * 0.8) / 2); // app icons carry padding, the logo doesn't
         // Status capsule: a slightly inset, rounded group holding Quick Settings and the clock. Its text
         // and glyphs keep Windows' taskbar sizes rather than scaling with the app icons, so small
-        // icons don't shrink the clock into illegibility and big ones don't make it shout.
+        // icons don't shrink the clock into illegibility and big ones don't make it shout. On a side
+        // dock the capsule turns into a column: glyphs stacked, then the time over a short date.
         double capsule = button - 6;
         var capsuleRadius = new CornerRadius(Math.Min(Pill.CornerRadius.TopLeft, capsule / 2) * 0.8);
-        StatusCapsule.Height = capsule;
-        StatusCapsule.Margin = new Thickness(4, 0, 2, 7);
+        SetSize(StatusCapsule, capsule, double.NaN);
+        StatusCapsule.Margin = edge.Margin(4, 2, 7);
         StatusCapsule.CornerRadius = capsuleRadius;
         QuickSettings.CornerRadius = Clock.CornerRadius = capsuleRadius;
-        QuickSettings.Padding = new Thickness(8, 0, 6, 0);
+        QuickSettings.Padding = vertical ? new Thickness(0, 8, 0, 6) : new Thickness(8, 0, 6, 0);
         foreach (var glyph in new[] { WifiBack, WifiGlyph, VolumeGlyph, BatteryGlyph })
         {
             glyph.FontSize = 15;
-            glyph.Margin = new Thickness(3, 0, 3, 0);
+            glyph.Margin = vertical ? new Thickness(0, 3, 0, 3) : new Thickness(3, 0, 3, 0);
         }
-        StatusDivider.Height = capsule * 0.45;
-        Clock.Padding = new Thickness(9, 0, 10, 0);
+        SetSize(StatusDivider, capsule * 0.45, 1);
+        Clock.Padding = vertical ? new Thickness(0, 7, 0, 8) : new Thickness(9, 0, 10, 0);
         ClockTime.FontSize = settings.ClockFontSize;
         ClockDate.FontSize = DateFontSize;
-        SettingsButton.Width = Math.Max(30, button * 0.8);
-        SettingsButton.Height = button;
-        SettingsButton.Margin = new Thickness(2, 0, 0, 4);
+        ClockTime.HorizontalAlignment = ClockDate.HorizontalAlignment = vertical ? HorizontalAlignment.Center : HorizontalAlignment.Right;
+        SetSize(SettingsButton, button, Math.Max(30, button * 0.8));
+        SettingsButton.Margin = edge.Margin(2, 0, 4);
         SettingsGlyph.FontSize = 16;
-        Resources["TraySlot"] = 28.0;
         Resources["TrayIcon"] = 16.0;
-        TrayArea.Height = button;
-        TrayArea.Margin = new Thickness(0, 0, 0, 4);
+        Resources["TrayItemWidth"] = vertical ? button : 28.0;
+        Resources["TrayItemHeight"] = vertical ? 28.0 : button;
+        SetSize(TrayArea, button, double.NaN);
+        SetSize(TrayMore, double.NaN, 28);
+        TrayArea.Margin = edge.Margin(0, 0, 4);
         TrayMoreGlyph.FontSize = 11;
-        // Desktops have no battery; don't show an icon for one.
 
         double sep = BaseSize * 0.6;
-        SepLeft.Height = SepRight.Height = sep;
-        SepLeft.Margin = SepRight.Margin = new Thickness(6, 0, 6, (PillHeight - sep) / 2);
+        SetSize(SepLeft, sep, 1);
+        SetSize(SepRight, sep, 1);
+        SepLeft.Margin = SepRight.Margin = edge.Margin(6, 6, (PillHeight - sep) / 2);
+        UpdateClock();
 
         double dpiScale = VisualTreeHelper.GetDpi(this).DpiScaleX;
         IconLoader.Trim(IconLoader.Bucket(BaseSize * dpiScale), IconLoader.Bucket(BaseSize * MaxScale * dpiScale));
@@ -223,31 +259,107 @@ public partial class MainWindow : Window
         Reposition();
     }
 
+    DockEdge? appliedEdge;
+
+    /// <summary>Turns the dock's rows and alignment to match its screen edge.</summary>
+    void ApplyOrientation()
+    {
+        var edge = Edge;
+        bool vertical = edge.IsVertical();
+        var orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
+
+        DockHost.HorizontalAlignment = edge.EdgeH();
+        DockHost.VerticalAlignment = edge.EdgeV();
+        DockRow.Orientation = TrayArea.Orientation = StatusRow.Orientation = QuickGlyphs.Orientation = orientation;
+        DockRow.Margin = vertical ? new Thickness(0, 8, 0, 8) : new Thickness(8, 0, 8, 0);
+        edge.HugEdge(DockRow);
+        foreach (var el in new FrameworkElement[] { StartButton, SepLeft, Apps, SepRight, TrayArea, StatusCapsule, SettingsButton })
+            edge.HugEdge(el);
+
+        // The pill is a band of the dock's thickness against the edge, as long as the row of icons.
+        edge.HugEdge(Pill);
+        Pill.Width = vertical ? PillHeight : double.NaN;
+        Pill.Height = vertical ? double.NaN : PillHeight;
+
+        DockItem.Edge = edge;
+        if (appliedEdge == edge) return;
+
+        Apps.ItemsPanel = StackPanelTemplate(orientation);
+        TrayPinned.ItemsPanel = StackPanelTemplate(orientation);
+        TrayPopup.Placement = MenuPlacement;
+
+        // A slide left over from the old edge would point the wrong way.
+        DockSlide.BeginAnimation(TranslateTransform.XProperty, null);
+        DockSlide.BeginAnimation(TranslateTransform.YProperty, null);
+        DockSlide.X = DockSlide.Y = 0;
+        autoHidden = sliding = false;
+        appliedEdge = edge;
+    }
+
+    static ItemsPanelTemplate StackPanelTemplate(Orientation orientation)
+    {
+        var panel = new FrameworkElementFactory(typeof(StackPanel));
+        panel.SetValue(StackPanel.OrientationProperty, orientation);
+        return new ItemsPanelTemplate(panel);
+    }
+
+    /// <summary>Menus and popups open on the screen side of the dock.</summary>
+    PlacementMode MenuPlacement => Edge switch
+    {
+        DockEdge.Top => PlacementMode.Bottom,
+        DockEdge.Left => PlacementMode.Right,
+        DockEdge.Right => PlacementMode.Left,
+        _ => PlacementMode.Top,
+    };
+
     void Reposition()
     {
         if (hwnd == IntPtr.Zero || appBar == null) return;
 
         var monitor = DockMonitor();
+        var edge = Edge;
         double s = VisualTreeHelper.GetDpi(this).DpiScaleY;
 
-        int bottom;
+        // Where the dock's band may sit: the reserved strip, or the work area (beside a visible taskbar).
+        Native.RECT area;
         if (settings.ReserveSpace)
         {
-            bottom = appBar.Reserve(hwnd, monitor.rcMonitor, (int)Math.Ceiling((PillHeight + Gap * 2) * s));
+            area = appBar.Reserve(hwnd, monitor.rcMonitor, (int)Math.Ceiling((PillHeight + Gap * 2) * s), edge);
         }
         else
         {
             appBar.Release();
-            bottom = DockMonitor().rcWork.Bottom;
+            area = DockMonitor().rcWork;
         }
 
-        // The window spans the monitor width; everything outside the pill is fully
-        // transparent, which a layered window lets clicks fall through.
-        double heightDip = PillHeight - BaseSize + BaseSize * MaxScale + Headroom; // room for the biggest magnified icon
-        Width = monitor.rcMonitor.Width / s;
-        Height = heightDip;
-        Left = monitor.rcMonitor.Left / s;
-        Top = (bottom - Gap * s) / s - heightDip;
+        // The window spans the monitor along the dock and is deep enough across for the biggest
+        // magnified icon plus its label; everything outside the pill is fully transparent, which a
+        // layered window lets clicks fall through.
+        double depth = PillHeight - BaseSize + BaseSize * MaxScale + Headroom;
+        double gap = Gap * s;
+        var m = monitor.rcMonitor;
+        switch (edge)
+        {
+            case DockEdge.Top:
+                (Left, Top, Width, Height) = (m.Left / s, (area.Top + gap) / s, m.Width / s, depth);
+                break;
+            case DockEdge.Left:
+                (Left, Top, Width, Height) = ((area.Left + gap) / s, m.Top / s, depth, m.Height / s);
+                break;
+            case DockEdge.Right:
+                (Left, Top, Width, Height) = ((area.Right - gap) / s - depth, m.Top / s, depth, m.Height / s);
+                break;
+            default:
+                (Left, Top, Width, Height) = (m.Left / s, (area.Bottom - gap) / s - depth, m.Width / s, depth);
+                break;
+        }
+    }
+
+    public void ApplyPositionSetting()
+    {
+        appBar?.Release(); // the reservation belongs to the old edge
+        ApplyLayout();
+        SyncBackdrop();
     }
 
     /// <summary>Keeps the blur window exactly under the pill, which resizes as icons magnify.</summary>
@@ -268,14 +380,18 @@ public partial class MainWindow : Window
         if (!sliding && !autoHidden)
         {
             pillRect = r;
-            tray.SetPlacement(r);
+            tray.SetPlacement(r, Edge);
         }
 
-        // While sliding away, the pill is clipped by the bottom of the dock window; clip the blur to match.
-        var windowBottom = PointToScreen(new Point(0, ActualHeight)).Y;
-        r.Bottom = Math.Min(r.Bottom, (int)Math.Round(windowBottom) - inset);
+        // While sliding away, the pill is clipped by the edge of the dock window; clip the blur to match.
+        var windowTopLeft = PointToScreen(new Point(0, 0));
+        var windowBottomRight = PointToScreen(new Point(ActualWidth, ActualHeight));
+        r.Left = Math.Max(r.Left, (int)Math.Round(windowTopLeft.X) + inset);
+        r.Top = Math.Max(r.Top, (int)Math.Round(windowTopLeft.Y) + inset);
+        r.Right = Math.Min(r.Right, (int)Math.Round(windowBottomRight.X) - inset);
+        r.Bottom = Math.Min(r.Bottom, (int)Math.Round(windowBottomRight.Y) - inset);
 
-        if (!settings.Blur || hiddenForFullscreen || (autoHidden && !sliding) || r.Bottom - r.Top <= 0)
+        if (!settings.Blur || hiddenForFullscreen || (autoHidden && !sliding) || r.Bottom - r.Top <= 0 || r.Right - r.Left <= 0)
         {
             backdrop.SetShown(false);
             return;
@@ -297,12 +413,26 @@ public partial class MainWindow : Window
             var work = monitor.rcWork;
             double s = VisualTreeHelper.GetDpi(this).DpiScaleY;
 
-            // Reveal by pushing the mouse against the bottom edge; stay while it's over the dock or its magnified icons.
-            bool atEdge = EdgeHeld(pt.Y >= work.Bottom - 3 && pt.Y <= monitor.rcMonitor.Bottom
-                                   && pt.X >= monitor.rcMonitor.Left && pt.X < monitor.rcMonitor.Right);
-            int reach = (int)((BaseSize * (MaxScale - 1) + Headroom) * s);
-            bool overDock = !autoHidden && pt.X >= pillRect.Left && pt.X < pillRect.Right
-                            && pt.Y >= pillRect.Top - reach && pt.Y <= work.Bottom;
+            // Reveal by pushing the mouse against the dock's screen edge; stay while it's over the dock or
+            // its magnified icons.
+            var mon = monitor.rcMonitor;
+            bool onMonitor = pt.X >= mon.Left && pt.X < mon.Right && pt.Y >= mon.Top && pt.Y < mon.Bottom;
+            bool atEdge = EdgeHeld(onMonitor && Edge switch
+            {
+                DockEdge.Top => pt.Y <= work.Top + 2,
+                DockEdge.Left => pt.X <= work.Left + 2,
+                DockEdge.Right => pt.X >= work.Right - 3,
+                _ => pt.Y >= work.Bottom - 3,
+            });
+            int reach = (int)((BaseSize * (MaxScale - 1) + LabelRoom) * s);
+            var p = pillRect;
+            bool overDock = !autoHidden && Edge switch
+            {
+                DockEdge.Top => pt.X >= p.Left && pt.X < p.Right && pt.Y >= work.Top && pt.Y <= p.Bottom + reach,
+                DockEdge.Left => pt.Y >= p.Top && pt.Y < p.Bottom && pt.X >= work.Left && pt.X <= p.Right + reach,
+                DockEdge.Right => pt.Y >= p.Top && pt.Y < p.Bottom && pt.X >= p.Left - reach && pt.X <= work.Right,
+                _ => pt.X >= p.Left && pt.X < p.Right && pt.Y >= p.Top - reach && pt.Y <= work.Bottom,
+            };
             hide = !atEdge && !overDock && DateTime.UtcNow >= revealedByHotkeyUntil && WindowOverlapsDock();
         }
         SetAutoHidden(HideAfterDelay(hide));
@@ -349,7 +479,9 @@ public partial class MainWindow : Window
 
         if (Native.GetClass(fg) == "ControlCenterWindow")
         {
-            if (!QuickSettings.IsVisible) return;
+            // Windows lays the panel out at the bottom of its window, so it can only be moved to sit
+            // over a bottom dock; on other edges it stays in Windows' own spot (bottom right).
+            if (!QuickSettings.IsVisible || Edge != DockEdge.Bottom) return;
             var dpi = VisualTreeHelper.GetDpi(this);
             double center = QuickSettings.PointToScreen(new Point(0, 0)).X + QuickSettings.ActualWidth * dpi.DpiScaleX / 2;
             x = Math.Clamp((int)(center - r.Width / 2.0), monitor.Left, monitor.Right - r.Width);
@@ -398,7 +530,13 @@ public partial class MainWindow : Window
         if (IsShellUi(Native.GetForegroundWindow())) return false; // Start & co. reveal the dock
         int gap = (int)(Gap * VisualTreeHelper.GetDpi(this).DpiScaleY);
         var area = pillRect;
-        area.Top -= gap;
+        switch (Edge)
+        {
+            case DockEdge.Top: area.Bottom += gap; break;
+            case DockEdge.Left: area.Right += gap; break;
+            case DockEdge.Right: area.Left -= gap; break;
+            default: area.Top -= gap; break;
+        }
         return WindowEnumerator.AnyAppWindowIntersects(area, ownPid);
     }
 
@@ -409,7 +547,8 @@ public partial class MainWindow : Window
         if (hide) SetHovered(null);
         else KeepOnTop();
 
-        var anim = new DoubleAnimation(hide ? PillHeight + Gap + 4 : 0, Duration(hide ? 220 : 180))
+        // Slide toward the screen edge, off the screen.
+        var anim = new DoubleAnimation(hide ? -Edge.Inward() * (PillHeight + Gap + 4) : 0, Duration(hide ? 220 : 180))
         {
             EasingFunction = new CubicEase { EasingMode = hide ? EasingMode.EaseIn : EasingMode.EaseOut },
         };
@@ -424,7 +563,7 @@ public partial class MainWindow : Window
             sliding = true;
             CompositionTarget.Rendering += OnSlideFrame;
         }
-        DockSlide.BeginAnimation(TranslateTransform.YProperty, anim);
+        DockSlide.BeginAnimation(Vertical ? TranslateTransform.XProperty : TranslateTransform.YProperty, anim);
     }
 
     void OnSlideFrame(object? sender, EventArgs e) => SyncBackdrop();
@@ -753,11 +892,11 @@ public partial class MainWindow : Window
         for (int i = 0; i < items.Count; i++)
         {
             if (Apps.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement c) continue;
-            var p = e.GetPosition(c);
-            if (p.X >= 0 && p.X < c.ActualWidth)
+            double along = Edge.Along(e.GetPosition(c)), length = Edge.AlongLength(c);
+            if (along >= 0 && along < length)
             {
                 index = i;
-                fraction = p.X / c.ActualWidth;
+                fraction = along / length;
                 break;
             }
         }
@@ -871,8 +1010,15 @@ public partial class MainWindow : Window
             };
         }
         previewItem = item;
-        var center = c.PointToScreen(new Point(c.ActualWidth / 2, 0));
-        previews.ShowFor(item.Windows, item.Icon, new Point(center.X, pillRect.Top), hwnd);
+        var center = c.PointToScreen(new Point(c.ActualWidth / 2, c.ActualHeight / 2));
+        var anchor = Edge switch
+        {
+            DockEdge.Top => new Point(center.X, pillRect.Bottom),
+            DockEdge.Left => new Point(pillRect.Right, center.Y),
+            DockEdge.Right => new Point(pillRect.Left, center.Y),
+            _ => new Point(center.X, pillRect.Top),
+        };
+        previews.ShowFor(item.Windows, item.Icon, anchor, Edge, hwnd);
         UpdateLabel();
     }
 
@@ -895,9 +1041,19 @@ public partial class MainWindow : Window
         }
         NameLabel.Visibility = Visibility.Visible;
         NameLabel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var top = c.TranslatePoint(new Point(c.ActualWidth / 2, 0), Root);
-        Canvas.SetLeft(NameLabel, top.X - NameLabel.DesiredSize.Width / 2);
-        Canvas.SetTop(NameLabel, top.Y - NameLabel.DesiredSize.Height - 2);
+        // An app's container stretches across the whole row; the slot inside it is the icon's own size.
+        if (c is ContentPresenter && VisualTreeHelper.GetChildrenCount(c) > 0 && VisualTreeHelper.GetChild(c, 0) is FrameworkElement slot) c = slot;
+        var r = new Rect(c.TranslatePoint(new Point(0, 0), Root), new Size(c.ActualWidth, c.ActualHeight));
+        double w = NameLabel.DesiredSize.Width, h = NameLabel.DesiredSize.Height;
+        var (x, y) = Edge switch
+        {
+            DockEdge.Top => (r.Left + r.Width / 2 - w / 2, r.Bottom + 2),
+            DockEdge.Left => (r.Right + 4, r.Top + r.Height / 2 - h / 2),
+            DockEdge.Right => (r.Left - w - 4, r.Top + r.Height / 2 - h / 2),
+            _ => (r.Left + r.Width / 2 - w / 2, r.Top - h - 2),
+        };
+        Canvas.SetLeft(NameLabel, x);
+        Canvas.SetTop(NameLabel, y);
     }
 
     // ---- Drag to reorder pinned apps ----------------------------------------------------------
@@ -920,7 +1076,7 @@ public partial class MainWindow : Window
         var p = e.GetPosition(Apps);
         if (!dragging)
         {
-            if (Math.Abs(p.X - dragStart.X) < DragThreshold) return false;
+            if (Math.Abs(Edge.Along(p) - Edge.Along(dragStart)) < DragThreshold) return false;
             dragging = true;
             Mouse.Capture(Apps, CaptureMode.SubTree);
             HidePreview();
@@ -934,8 +1090,8 @@ public partial class MainWindow : Window
         for (int i = 0; i < items.Count; i++)
         {
             if (Apps.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement c) continue;
-            double x = e.GetPosition(c).X;
-            if (x < 0 || x >= c.ActualWidth) continue;
+            double along = Edge.Along(e.GetPosition(c));
+            if (along < 0 || along >= Edge.AlongLength(c)) continue;
             var target = items[i];
             if (target != dragItem) MoveApp(dragItem!, target);
             break;
@@ -1077,7 +1233,9 @@ public partial class MainWindow : Window
         if (Apps.ItemContainerGenerator.ContainerFromItem(item) is not UIElement c) return;
         var t = new TranslateTransform();
         c.RenderTransform = t;
-        t.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, -14, TimeSpan.FromMilliseconds(260))
+        // Hop away from the screen edge.
+        t.BeginAnimation(Vertical ? TranslateTransform.XProperty : TranslateTransform.YProperty,
+            new DoubleAnimation(0, 14 * Edge.Inward(), TimeSpan.FromMilliseconds(260))
         {
             AutoReverse = true,
             RepeatBehavior = new RepeatBehavior(2),
@@ -1095,7 +1253,7 @@ public partial class MainWindow : Window
     {
         var now = DateTime.Now;
         ClockTime.Text = now.ToString("t");
-        ClockDate.Text = now.ToString("d");
+        ClockDate.Text = now.ToString(Vertical ? ShortDateFormat : "d"); // a full date is too wide for a side dock
     }
 
     // ---- Live status icons ------------------------------------------------------------------
@@ -1233,7 +1391,7 @@ public partial class MainWindow : Window
         if (trayPress != null && e.LeftButton == MouseButtonState.Pressed)
         {
             var p = e.GetPosition(TrayPinned);
-            if (!trayDragging && Math.Abs(p.X - trayPressStart.X) >= DragThreshold)
+            if (!trayDragging && Math.Abs(Edge.Along(p) - Edge.Along(trayPressStart)) >= DragThreshold)
             {
                 trayDragging = true;
                 trayPressElement?.CaptureMouse();
@@ -1247,8 +1405,8 @@ public partial class MainWindow : Window
                 for (int i = 0; i < TrayPinned.Items.Count; i++)
                 {
                     if (TrayPinned.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement c) continue;
-                    double x = e.GetPosition(c).X;
-                    if (x < 0 || x >= c.ActualWidth) continue;
+                    double along = Edge.Along(e.GetPosition(c));
+                    if (along < 0 || along >= Edge.AlongLength(c)) continue;
                     if (TrayPinned.Items[i] is NotifyIcon target && target != trayPress) tray.MovePin(trayPress, target);
                     break;
                 }
@@ -1546,7 +1704,7 @@ public partial class MainWindow : Window
         activeMenu = menu; // keeps an auto-hiding dock on screen while it's up
         menu.Opened += (_, _) => PopupOpening();
         menu.PlacementTarget = target ?? Pill;
-        menu.Placement = PlacementMode.Top;
+        menu.Placement = MenuPlacement;
         menu.IsOpen = true;
     }
 

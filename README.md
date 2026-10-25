@@ -1,6 +1,6 @@
 # Tasky
 
-A floating dock for Windows 11. It sits at the bottom of the screen in place of the Windows taskbar, with your pinned and running apps, a system tray, Quick Settings and a clock.
+A floating dock for Windows 11. It sits at the bottom, top, left or right of the screen in place of the Windows taskbar, with your pinned and running apps, a system tray, Quick Settings and a clock.
 
 ![Tasky's dock: Start, pinned and running apps with one magnified under the cursor, the tray arrow, Quick Settings icons, the clock and the settings gear](docs/dock.png)
 
@@ -82,7 +82,7 @@ Settings, pins and an error log are kept in `%APPDATA%\Tasky`.
 | --- | --- |
 | Size | Icon size, space between icons, magnify on hover, magnification amount |
 | Look | Theme (match Windows, dark, light), corner roundness, background opacity, blur, clock size, distance from the screen edge, animation speed |
-| Behavior | Dock mode (below), reveal delay, hide delay, which display the dock is on, the Ctrl + Alt + D shortcut, show tray icons, hide the Windows taskbar, start with Windows, Start menu shortcut |
+| Behavior | Dock mode (below), reveal delay, hide delay, screen edge (bottom, top, left or right), which display the dock is on, the Ctrl + Alt + D shortcut, show tray icons, hide the Windows taskbar, start with Windows, Start menu shortcut |
 | About | Version, a link to this page, and the folder with Tasky's settings |
 
 **Dock modes**
@@ -102,7 +102,7 @@ With blur on, Windows only allows square, 4 px or 8 px corners on the blurred ar
 ## Known limitations
 
 - One dock, on one display (choose which in settings). Hiding the Windows taskbar only hides it on the main display.
-- The dock sits at the bottom of the screen; left, right and top aren't supported yet.
+- When the dock isn't at the bottom, Quick Settings opens in Windows' own spot (bottom right) rather than next to the dock.
 - Right-click menus show an app's recent files, but not the custom tasks some apps add to their jump lists (Windows only shares those with its own taskbar).
 - While Tasky shows the tray, other apps that reserve screen space the way the taskbar does (other docks and toolbars) can't.
 - Tray icons of apps running as administrator only respond if Tasky also runs as administrator.

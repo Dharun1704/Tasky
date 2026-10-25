@@ -63,6 +63,11 @@ public partial class SettingsWindow : Window
         HideTaskbar.IsChecked = settings.HideTaskbar;
         AutoStart.IsChecked = Tasky.AutoStart.Enabled;
         StartMenu.IsChecked = StartMenuShortcut.Exists;
+        var edge = DockEdges.Parse(settings.Position);
+        EdgeBottom.IsChecked = edge == DockEdge.Bottom;
+        EdgeTop.IsChecked = edge == DockEdge.Top;
+        EdgeLeft.IsChecked = edge == DockEdge.Left;
+        EdgeRight.IsChecked = edge == DockEdge.Right;
         LoadMonitors();
         var version = typeof(SettingsWindow).Assembly.GetName().Version;
         VersionText.Text = $"Tasky {version?.ToString(3)}";
@@ -129,6 +134,15 @@ public partial class SettingsWindow : Window
             Changed(look: false);
         };
         Toggle(ShowHotkey, on => { settings.ShowHotkey = on; dock.ApplyHotkeySetting(); });
+
+        foreach (var (button, edge) in new[] { (EdgeBottom, DockEdge.Bottom), (EdgeTop, DockEdge.Top), (EdgeLeft, DockEdge.Left), (EdgeRight, DockEdge.Right) })
+            button.Checked += (_, _) =>
+            {
+                if (loading) return;
+                settings.Position = edge.ToString();
+                dock.ApplyPositionSetting();
+                Changed(look: false);
+            };
 
         foreach (var (button, theme) in new[] { (ThemeSystem, "System"), (ThemeDark, "Dark"), (ThemeLight, "Light") })
             button.Checked += (_, _) =>

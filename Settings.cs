@@ -27,6 +27,8 @@ internal sealed class Settings
     public bool ShowTray { get; set; } = true;
     /// <summary>Device name of the display the dock lives on (e.g. \\.\DISPLAY2); null means the main display.</summary>
     public string? Monitor { get; set; }
+    /// <summary>Screen edge: "Bottom", "Top", "Left" or "Right".</summary>
+    public string Position { get; set; } = "Bottom";
     /// <summary>"System", "Dark" or "Light".</summary>
     public string Theme { get; set; } = "System";
     /// <summary>How long the mouse must rest at the screen edge before a hidden dock appears, in ms.</summary>

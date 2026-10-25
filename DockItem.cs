@@ -58,22 +58,34 @@ internal sealed class DockItem(string key, string launchPath) : INotifyPropertyC
     public static double Spacing { get; set; } = 10;
 
     /// <summary>
-    /// Gap between a resting icon and the pill's top and bottom edges. The pill can be taller than
-    /// icon + 16 (a large clock needs room), so this centres the icons in whatever height it has.
-    /// Magnified icons grow upward from the same bottom gap.
+    /// Gap between a resting icon and the pill's two long edges. The pill can be thicker than
+    /// icon + 16 (a large clock needs room), so this centres the icons in whatever thickness it has.
+    /// Magnified icons grow away from the screen edge, from the same gap on the edge side.
     /// </summary>
     public static double Inset { get; set; } = 8;
 
-    public double SlotWidth => Size + Spacing;
-    public double SlotHeight => Size + Inset * 2;
-    public System.Windows.Thickness IconMargin => new(0, 0, 0, Inset);
+    /// <summary>The screen edge the dock is on; decides which way slots run and icons grow.</summary>
+    public static DockEdge Edge { get; set; } = DockEdge.Bottom;
 
-    /// <summary>Re-measures the slot after <see cref="Spacing"/> or <see cref="Inset"/> changes.</summary>
+    double Along => Size + Spacing;
+    double Across => Size + Inset * 2;
+    public double SlotWidth => Edge.IsVertical() ? Across : Along;
+    public double SlotHeight => Edge.IsVertical() ? Along : Across;
+    public System.Windows.Thickness IconMargin => Edge.Margin(0, 0, Inset);
+    public System.Windows.Thickness IndicatorMargin => Edge.Margin(0, 0, 2);
+    public System.Windows.Thickness HoverMargin => Edge.Margin(1, 1, 2, 4);
+    public System.Windows.HorizontalAlignment EdgeH => Edge.EdgeH();
+    public System.Windows.VerticalAlignment EdgeV => Edge.EdgeV();
+    /// <summary>The running/active bar is drawn lying along a bottom dock; it stands up on a side dock.</summary>
+    public System.Windows.Media.Transform IndicatorTransform =>
+        Edge.IsVertical() ? new System.Windows.Media.RotateTransform(90) : System.Windows.Media.Transform.Identity;
+
+    /// <summary>Re-measures the slot after <see cref="Spacing"/>, <see cref="Inset"/> or <see cref="Edge"/> changes.</summary>
     public void RefreshSlot()
     {
-        OnChanged(nameof(SlotWidth));
-        OnChanged(nameof(SlotHeight));
-        OnChanged(nameof(IconMargin));
+        foreach (var p in new[] { nameof(SlotWidth), nameof(SlotHeight), nameof(IconMargin), nameof(IndicatorMargin),
+                                  nameof(HoverMargin), nameof(EdgeH), nameof(EdgeV), nameof(IndicatorTransform) })
+            OnChanged(p);
     }
 
     bool Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
