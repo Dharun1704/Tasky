@@ -12,6 +12,8 @@ internal sealed class DockItem(string key, string launchPath) : INotifyPropertyC
     /// <summary>Lower-cased exe path (or shortcut path) used to match windows to the item.</summary>
     public string Key { get; } = key;
     public string LaunchPath { get; set; } = launchPath;
+    /// <summary>False for windows whose program can't be identified (e.g. the UAC prompt): nothing to start or pin.</summary>
+    public bool CanLaunch => LaunchPath.Length > 0;
     public string Name { get; set; } = "";
     public bool IsPinned { get; set; }
 

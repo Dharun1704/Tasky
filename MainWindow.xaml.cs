@@ -58,7 +58,13 @@ public partial class MainWindow : Window
     bool PreviewShown => previews?.IsVisible == true;
     Native.RECT pillRect; // where the pill sits on screen when shown, in pixels
 
-    double BaseSize => settings.IconSize;
+    /// <summary>The icon size in use: the setting, or smaller while that many apps wouldn't fit on screen.</summary>
+    double BaseSize => Math.Min(settings.IconSize, fitSize);
+    double fitSize = double.MaxValue;
+    /// <summary>How many running apps (from the end) don't fit even at the smallest size; they go in the overflow menu.</summary>
+    int overflowCount;
+    readonly List<DockItem> overflowItems = new();
+    const double MinFitSize = 24;
     double Gap => settings.EdgeGap;                                      // pill to screen edge
     double MaxScale => settings.Magnify ? settings.MagnifyScale : 1;    // icon under the cursor
     double DateFontSize => Math.Round(settings.ClockFontSize * 0.82, 1);
@@ -127,6 +133,14 @@ public partial class MainWindow : Window
         Native.RegisterShellHookWindow(hwnd);
         ApplyHotkeySetting();
 
+        windowEvents = new WindowEvents();
+        windowEvents.LayoutChanged += () => overlapDirty = true;
+        windowEvents.WindowsChanged += ScheduleRefresh;
+        // Network and power changes arrive as events; the status icons only poll the volume.
+        System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += (_, _) => Dispatcher.InvokeAsync(() => statusDirty = true);
+        System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged += (_, _) => Dispatcher.InvokeAsync(() => statusDirty = true);
+        Microsoft.Win32.SystemEvents.PowerModeChanged += (_, _) => Dispatcher.InvokeAsync(() => statusDirty = true);
+
         try
         {
             ApplyTaskbar();
@@ -146,7 +160,17 @@ public partial class MainWindow : Window
         uint m = (uint)msg;
         if (m == shellHookMsg)
         {
-            if ((int)wParam == Native.HSHELL_FLASH) MarkAttention(lParam);
+            // Windows announces each window it gives a taskbar button, including hidden ones such as
+            // the background UAC prompt; remember those so they reach the dock too.
+            switch ((int)wParam)
+            {
+                case HSHELL_WINDOWCREATED: announced.Add(lParam); break;
+                case HSHELL_WINDOWDESTROYED: announced.Remove(lParam); break;
+                case Native.HSHELL_FLASH:
+                    announced.Add(lParam);
+                    pendingAttention.Add(lParam);
+                    break;
+            }
             ScheduleRefresh();
         }
         else if (m == appBarMsg)
@@ -229,6 +253,8 @@ public partial class MainWindow : Window
         ClockDate.FontSize = DateFontSize;
         ClockTime.HorizontalAlignment = ClockDate.HorizontalAlignment = vertical ? HorizontalAlignment.Center : HorizontalAlignment.Right;
         SetSize(SettingsButton, button, Math.Max(30, button * 0.8));
+        SetSize(OverflowButton, button, Math.Max(30, BaseSize * 0.8));
+        OverflowButton.Margin = edge.Margin(2, 0, 4);
         SettingsButton.Margin = edge.Margin(2, 0, 4);
         SettingsGlyph.FontSize = 16;
         Resources["TrayIcon"] = 16.0;
@@ -257,6 +283,86 @@ public partial class MainWindow : Window
             PreloadIcons(item);
         }
         Reposition();
+        ScheduleFit(); // a bigger icon size or clock may not fit any more
+    }
+
+    // ---- Fitting the dock on screen ---------------------------------------------------------
+
+    bool fitPending;
+
+    /// <summary>Checks the fit once the current layout pass has finished.</summary>
+    void ScheduleFit()
+    {
+        if (fitPending) return;
+        fitPending = true;
+        Dispatcher.InvokeAsync(() => { fitPending = false; FitToScreen(); }, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// When the dock would be longer than the screen, shrinks the app icons (down to 24 px; they
+    /// still magnify on hover), and past that moves the last running apps into the overflow menu.
+    /// It grows back as apps close.
+    /// </summary>
+    void FitToScreen()
+    {
+        if (hwnd == IntPtr.Zero || !DockRow.IsLoaded) return;
+        var edge = Edge;
+        double s = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        var m = DockMonitor().rcMonitor;
+        double available = (edge.IsVertical() ? m.Height : m.Width) / s - 32; // a little air at both ends
+
+        double Along(Size size) => edge.IsVertical() ? size.Height : size.Width;
+        double margins = edge.IsVertical() ? DockRow.Margin.Top + DockRow.Margin.Bottom : DockRow.Margin.Left + DockRow.Margin.Right;
+        // Everything but the app icons (Start, tray, clock...), which doesn't grow with icon count. Summed
+        // child by child: the row's own measured size is capped at the window, exactly when it overflows.
+        double fixedPart = margins + DockRow.Children.OfType<FrameworkElement>()
+            .Where(c => c != Apps && c.Visibility != Visibility.Collapsed)
+            .Sum(c => Along(c.DesiredSize));
+        if (OverflowButton.Visibility != Visibility.Visible) fixedPart += Math.Max(30, BaseSize * 0.8) + 2; // room for it, should it appear
+        int count = items.Count + overflowItems.Count;
+        double spacing = settings.IconSpacing;
+        double magnifyScale = settings.Magnify ? settings.MagnifyScale : 1;
+
+        // The row's length at a given icon size, at rest plus what a magnified wave adds under the cursor.
+        double Needed(double size, int icons) => fixedPart + icons * (size + spacing) + (magnifyScale - 1) * size * 2.2;
+
+        double newFit = double.MaxValue;
+        int newOverflow = 0;
+        if (Needed(settings.IconSize, count) > available)
+        {
+            newFit = settings.IconSize;
+            while (newFit > MinFitSize && Needed(newFit, count) > available) newFit -= 2;
+            newFit = Math.Max(MinFitSize, newFit);
+            if (Needed(newFit, count) > available)
+            {
+                int fits = (int)Math.Floor((available - fixedPart - (magnifyScale - 1) * newFit * 2.2) / (newFit + spacing));
+                newOverflow = Math.Max(1, count - Math.Max(1, fits));
+            }
+        }
+        // Growing back needs some room to spare, so the dock doesn't flip between two sizes.
+        if (newFit > BaseSize && fitSize != double.MaxValue && Needed(Math.Min(newFit, settings.IconSize), count) > available - 24)
+            newFit = fitSize;
+
+        bool sizeChanged = !newFit.Equals(fitSize);
+        bool overflowChanged = newOverflow != overflowCount;
+        fitSize = newFit;
+        overflowCount = newOverflow;
+        if (sizeChanged) ApplyLayout();
+        if (overflowChanged) Refresh();
+    }
+
+    void OnOverflowClick(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        HidePreview();
+        var menu = new ContextMenu();
+        menu.Items.Add(Section("More apps"));
+        foreach (var item in overflowItems)
+        {
+            var it = item;
+            menu.Items.Add(Item(it.Name, () => OnItemClick(it), icon: MenuImage(it.Icon), active: it.IsActive));
+        }
+        Open(menu, OverflowButton);
     }
 
     DockEdge? appliedEdge;
@@ -273,7 +379,7 @@ public partial class MainWindow : Window
         DockRow.Orientation = TrayArea.Orientation = StatusRow.Orientation = QuickGlyphs.Orientation = orientation;
         DockRow.Margin = vertical ? new Thickness(0, 8, 0, 8) : new Thickness(8, 0, 8, 0);
         edge.HugEdge(DockRow);
-        foreach (var el in new FrameworkElement[] { StartButton, SepLeft, Apps, SepRight, TrayArea, StatusCapsule, SettingsButton })
+        foreach (var el in new FrameworkElement[] { StartButton, SepLeft, Apps, OverflowButton, SepRight, TrayArea, StatusCapsule, SettingsButton })
             edge.HugEdge(el);
 
         // The pill is a band of the dock's thickness against the edge, as long as the row of icons.
@@ -433,7 +539,8 @@ public partial class MainWindow : Window
                 DockEdge.Right => pt.Y >= p.Top && pt.Y < p.Bottom && pt.X >= p.Left - reach && pt.X <= work.Right,
                 _ => pt.X >= p.Left && pt.X < p.Right && pt.Y >= p.Top - reach && pt.Y <= work.Bottom,
             };
-            hide = !atEdge && !overDock && DateTime.UtcNow >= revealedByHotkeyUntil && WindowOverlapsDock();
+            // An app asking for attention (or the UAC prompt) keeps the dock out until it's dealt with.
+            hide = !atEdge && !overDock && !attentionShown && DateTime.UtcNow >= revealedByHotkeyUntil && WindowOverlapsDock();
         }
         SetAutoHidden(HideAfterDelay(hide));
         AlignShellFlyout();
@@ -537,15 +644,33 @@ public partial class MainWindow : Window
             case DockEdge.Right: area.Left -= gap; break;
             default: area.Top -= gap; break;
         }
-        return WindowEnumerator.AnyAppWindowIntersects(area, ownPid);
+        // Scanning every window is the costliest thing the dock does, so the answer is reused until a
+        // window moves, opens, closes or changes focus (or for a second, in case an event was missed).
+        if (!overlapDirty && area.Equals(overlapArea) && DateTime.UtcNow - overlapAt < TimeSpan.FromSeconds(1))
+            return overlapCached;
+        overlapCached = WindowEnumerator.AnyAppWindowIntersects(area, ownPid);
+        overlapArea = area;
+        overlapAt = DateTime.UtcNow;
+        overlapDirty = false;
+        return overlapCached;
     }
+
+    bool overlapDirty = true, overlapCached;
+    Native.RECT overlapArea;
+    DateTime overlapAt;
+    WindowEvents? windowEvents;
 
     void SetAutoHidden(bool hide)
     {
         if (hide == autoHidden) return;
         autoHidden = hide;
         if (hide) SetHovered(null);
-        else KeepOnTop();
+        else
+        {
+            KeepOnTop();
+            UpdateClock();  // neither is kept current while the dock is hidden
+            UpdateStatus();
+        }
 
         // Slide toward the screen edge, off the screen.
         var anim = new DoubleAnimation(hide ? -Edge.Inward() * (PillHeight + Gap + 4) : 0, Duration(hide ? 220 : 180))
@@ -665,11 +790,25 @@ public partial class MainWindow : Window
         refreshSoon.Start();
     }
 
+    int ticks;
+
+    /// <summary>
+    /// Once a second. Most work is event-driven (windows opening, closing, moving; network and power
+    /// changes); this keeps the clock and volume current and re-checks the app list every 5 seconds in
+    /// case an event was missed. Nothing visual is updated while the dock is hidden.
+    /// </summary>
     void OnTick()
     {
-        UpdateClock();
-        UpdateStatus();
-        Refresh();
+        ticks++;
+        bool visible = !autoHidden && !hiddenForFullscreen;
+        if (visible)
+        {
+            UpdateClock();
+            UpdateStatus();
+        }
+        if (ticks % 5 == 0) Refresh();
+        // Over a fullscreen app the dock stays away, so the mouse-edge check can idle.
+        autoHideTimer.Interval = TimeSpan.FromMilliseconds(hiddenForFullscreen ? 500 : 120);
 
         // Explorer sometimes brings its taskbar back (e.g. after display changes).
         if (settings.HideTaskbar && WindowsTaskbar.IsVisible) WindowsTaskbar.SetVisible(false);
@@ -687,7 +826,8 @@ public partial class MainWindow : Window
 
     void Refresh()
     {
-        var windows = WindowEnumerator.GetAppWindows(ownPid);
+        announced.RemoveWhere(h => !Native.IsWindow(h));
+        var windows = WindowEnumerator.GetAppWindows(ownPid, announced);
         TrackForeground();
 
         var groups = new Dictionary<string, List<AppWindow>>(StringComparer.OrdinalIgnoreCase);
@@ -729,10 +869,19 @@ public partial class MainWindow : Window
             item.IsRunning = ws.Count > 0;
             item.IsActive = ws.Any(w => w.Hwnd == lastForeground);
             if (item.IsActive || !item.IsRunning) item.IsAttention = false;
+            else if (ws.Any(WindowEnumerator.IsUac)) item.IsAttention = true; // waiting for your permission
             if (item.Icon == null && ws.Count > 0) item.Icon = IconLoader.FromWindow(ws[0].Hwnd);
         }
 
-        Sync(desired);
+        // Apps that don't fit on screen even at the smallest size: the last ones (running, not pinned)
+        // move to the overflow menu.
+        int hidden = Math.Clamp(overflowCount, 0, Math.Max(0, desired.Count - 1));
+        overflowItems.Clear();
+        overflowItems.AddRange(desired.Skip(desired.Count - hidden));
+        OverflowButton.Visibility = hidden > 0 ? Visibility.Visible : Visibility.Collapsed;
+        Sync(desired.Take(desired.Count - hidden).ToList());
+        ApplyAttention();
+        ScheduleFit();
         foreach (var key in itemsByKey.Keys.Where(k => !used.Contains(k)).ToList())
         {
             if (itemsByKey[key].IconPath is { } path) IconLoader.Forget(path); // the app left the dock
@@ -744,13 +893,32 @@ public partial class MainWindow : Window
     {
         if (!itemsByKey.TryGetValue(key, out var item))
         {
-            item = new DockItem(key, launchPath) { Name = DisplayName(launchPath), Size = BaseSize, IconPath = launchPath };
-            UpdateIcon(item);
-            if (item.Icon != null) PreloadIcons(item);
+            var first = windows is { Count: > 0 } ? windows[0] : null;
+            if (first != null && WindowEnumerator.IsUac(first))
+            {
+                // The UAC prompt's program can't be read; show it the way the taskbar does.
+                item = new DockItem(key, "") { Name = "User Account Control", Size = BaseSize, Icon = IconLoader.Shield() };
+            }
+            else if (launchPath.Length == 0)
+            {
+                // A window whose program can't be identified: name and icon come from the window.
+                item = new DockItem(key, "") { Name = first?.Title ?? "", Size = BaseSize, Icon = first != null ? IconLoader.FromWindow(first.Hwnd) : null };
+            }
             else
             {
-                item.IconPath = null;
-                item.Icon = windows is { Count: > 0 } ? IconLoader.FromWindow(windows[0].Hwnd) : null;
+                // An exe without a name of its own is better known by its window title.
+                string name = first != null && launchPath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                              && !ExeNames.HasName(launchPath) && first.Title.Length > 0
+                    ? first.Title
+                    : DisplayName(launchPath);
+                item = new DockItem(key, launchPath) { Name = name, Size = BaseSize, IconPath = launchPath };
+                UpdateIcon(item);
+                if (item.Icon != null) PreloadIcons(item);
+                else
+                {
+                    item.IconPath = null;
+                    item.Icon = first != null ? IconLoader.FromWindow(first.Hwnd) : null;
+                }
             }
             itemsByKey[key] = item;
         }
@@ -778,6 +946,7 @@ public partial class MainWindow : Window
         Dispatcher.InvokeAsync(() =>
         {
             for (int px = from; px <= to; px += IconLoader.Step) IconLoader.FromPath(path, px);
+            IconLoader.ReleaseSource(path); // every size it can be drawn at is cached now
         }, DispatcherPriority.ApplicationIdle);
     }
 
@@ -802,11 +971,28 @@ public partial class MainWindow : Window
         if (pid != ownPid) lastForeground = fg;
     }
 
-    void MarkAttention(IntPtr h)
+    const int HSHELL_WINDOWCREATED = 1, HSHELL_WINDOWDESTROYED = 2;
+    readonly HashSet<IntPtr> announced = new();
+    /// <summary>Windows that flashed for attention since the last refresh (they may not be on the dock yet).</summary>
+    readonly HashSet<IntPtr> pendingAttention = new();
+
+    /// <summary>
+    /// Marks apps whose window flashed (or that are asking for elevation) and brings a hidden dock
+    /// out for them: with the Windows taskbar hidden, the dock is the only place they'd show.
+    /// </summary>
+    void ApplyAttention()
     {
-        foreach (var item in items)
-            if (h != lastForeground && item.Windows.Any(w => w.Hwnd == h)) item.IsAttention = true;
+        foreach (var h in pendingAttention)
+            foreach (var item in items.Concat(overflowItems))
+                if (h != lastForeground && item.Windows.Any(w => w.Hwnd == h)) item.IsAttention = true;
+        pendingAttention.Clear();
+
+        bool wanted = items.Concat(overflowItems).Any(i => i.IsAttention);
+        if (wanted && !attentionShown) SetAutoHidden(false);
+        attentionShown = wanted;
     }
+
+    bool attentionShown;
 
     bool IsFullscreenForeground()
     {
@@ -830,13 +1016,13 @@ public partial class MainWindow : Window
         key = pin;
         if (pin.StartsWith(AppWindow.AppsFolder, StringComparison.OrdinalIgnoreCase))
             key = pin[AppWindow.AppsFolder.Length..];
-        else if (pin.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) && ResolveShortcut(pin) is { } target
-            && target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-            key = target;
+        else if (pin.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) && ResolveShortcut(pin) is { Arguments: "" } target
+            && target.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            key = target.Path; // a shortcut with arguments (a game through its launcher) stays its own app
         return pinKeys[pin] = key;
     }
 
-    static string? ResolveShortcut(string lnk)
+    static (string Path, string Arguments)? ResolveShortcut(string lnk)
     {
         try
         {
@@ -847,7 +1033,8 @@ public partial class MainWindow : Window
             {
                 dynamic shortcut = shell.CreateShortcut(lnk);
                 string target = shortcut.TargetPath;
-                return string.IsNullOrEmpty(target) ? null : target;
+                string arguments = shortcut.Arguments ?? "";
+                return string.IsNullOrEmpty(target) ? null : (target, arguments.Trim());
             }
             finally { Marshal.FinalReleaseComObject(shell); }
         }
@@ -990,9 +1177,12 @@ public partial class MainWindow : Window
             previews.WindowChosen += h =>
             {
                 HidePreview();
-                Activate(h);
-                lastForeground = h;
-                ScheduleRefresh();
+                AfterPanelsClose(() =>
+                {
+                    Activate(h);
+                    lastForeground = h;
+                    ScheduleRefresh();
+                });
             };
             previews.WindowClosed += h =>
             {
@@ -1118,6 +1308,7 @@ public partial class MainWindow : Window
         }
         else if (!item.IsPinned && target.IsPinned)
         {
+            if (!item.CanLaunch) return; // nothing to pin
             int to = PinIndex(target);
             if (to < 0) return;
             settings.Pins.Insert(to, item.LaunchPath);
@@ -1164,14 +1355,43 @@ public partial class MainWindow : Window
         switch (e.ChangedButton)
         {
             case MouseButton.Left: OnItemClick(item); break;
-            case MouseButton.Middle: Launch(item); break;
+            case MouseButton.Middle: AfterPanelsClose(() => Launch(item)); break;
             case MouseButton.Right: HidePreview(); ShowItemMenu(item, e.OriginalSource as UIElement); break;
         }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="action"/>, closing anything open over the screen first. Start, Search,
+    /// Quick Settings and the notification center stay in front of whatever opens and make Windows
+    /// refuse to switch apps; clicking the real taskbar closes them first, and so does this.
+    /// </summary>
+    void AfterPanelsClose(Action action)
+    {
+        TrayPopup.IsOpen = false;
+        if (activeMenu is { IsOpen: true }) activeMenu.IsOpen = false;
+        if (!IsShellUi(Native.GetForegroundWindow()))
+        {
+            action();
+            return;
+        }
+        Native.PressKeys(Native.VK_ESCAPE);
+        var later = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+        later.Tick += (_, _) =>
+        {
+            later.Stop();
+            action();
+        };
+        later.Start();
     }
 
     void OnItemClick(DockItem item)
     {
         HidePreview();
+        AfterPanelsClose(() => ActivateOrLaunch(item));
+    }
+
+    void ActivateOrLaunch(DockItem item)
+    {
         if (!item.IsRunning)
         {
             Launch(item);
@@ -1216,6 +1436,7 @@ public partial class MainWindow : Window
 
     void Launch(DockItem item)
     {
+        if (!item.CanLaunch) return;
         try
         {
             Process.Start(new ProcessStartInfo(item.LaunchPath)
@@ -1262,14 +1483,19 @@ public partial class MainWindow : Window
     BatteryStatus battery = new(false, 0, false, false);
     VolumeStatus volume = new(0, false, false);
     int statusTicks;
+    bool statusDirty = true;
 
-    /// <summary>Volume every second (it changes from keyboards and apps); network and battery every 5.</summary>
+    /// <summary>
+    /// Volume every call (it changes from keyboards and apps, with no cheap event); network and battery
+    /// when Windows reports a change, or every 30 seconds for signal strength and charge.
+    /// </summary>
     void UpdateStatus()
     {
-        if (statusTicks++ % 5 == 0)
+        if (statusDirty || statusTicks++ % 30 == 0)
         {
             network = StatusMonitor.Network();
             battery = StatusMonitor.Battery();
+            statusDirty = false;
         }
         volume = StatusMonitor.Volume();
 
@@ -1598,19 +1824,22 @@ public partial class MainWindow : Window
             menu.Items.Add(new Separator());
         }
 
-        menu.Items.Add(item.IsRunning
-            ? Item("New window", () => Launch(item), icon: Glyph(""))
-            : Item($"Open {item.Name}", () => Launch(item), icon: MenuImage(item.Icon) ?? (object)Glyph("")));
-        menu.Items.Add(item.IsPinned
-            ? Item("Unpin from dock", () => TogglePin(item), icon: Glyph(""))
-            : Item("Pin to dock", () => TogglePin(item), icon: Glyph("")));
+        if (item.CanLaunch)
+        {
+            menu.Items.Add(item.IsRunning
+                ? Item("New window", () => Launch(item), icon: Glyph("\uE710"))
+                : Item($"Open {item.Name}", () => Launch(item), icon: MenuImage(item.Icon) ?? (object)Glyph("\uE8A7")));
+            menu.Items.Add(item.IsPinned
+                ? Item("Unpin from dock", () => TogglePin(item), icon: Glyph("\uE77A"))
+                : Item("Pin to dock", () => TogglePin(item), icon: Glyph("\uE718")));
+        }
         if (item.IsRunning)
         {
             menu.Items.Add(Item(item.Windows.Count > 1 ? "Close all windows" : "Close window", () =>
             {
                 foreach (var w in item.Windows) Native.PostMessage(w.Hwnd, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
                 ScheduleRefresh();
-            }, icon: Glyph("")));
+            }, icon: Glyph("\uE711")));
         }
         Open(menu, target);
     }
@@ -1755,8 +1984,8 @@ public partial class MainWindow : Window
 
     static object RecentIcon(RecentItem r)
     {
-        if (r.Path.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return Glyph(""); // globe
-        return MenuImage(IconLoader.Small(r.Path)) ?? (object)Glyph(""); // the file's own icon, else a page
+        if (r.Path.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return Glyph("\uE774"); // globe
+        return MenuImage(IconLoader.Small(r.Path)) ?? (object)Glyph("\uE8A5"); // the file's own icon, else a page
     }
 
     void TogglePin(DockItem item)
@@ -1837,6 +2066,7 @@ public partial class MainWindow : Window
             appBar?.Release();
             if (hwnd != IntPtr.Zero) Native.DeregisterShellHookWindow(hwnd);
             if (hwnd != IntPtr.Zero) UnregisterHotKey(hwnd, HotkeyId);
+            windowEvents?.Dispose();
             previews?.Close();
         }
         catch (Exception ex) { Log.Error(ex, "cleanup"); }

@@ -91,6 +91,13 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
+                <!-- Running apps that don't fit on the screen, in a menu -->
+                <Border x:Name="OverflowButton" Style="{StaticResource DockButton}" Visibility="Collapsed"
+                        MouseLeftButtonUp="OnOverflowClick" MouseRightButtonUp="OnOverflowClick">
+                    <TextBlock x:Name="OverflowGlyph" Text="&#xE712;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               FontSize="16" Foreground="{DynamicResource T.Glyph}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+
                 <Rectangle x:Name="SepRight" Width="1" Fill="{DynamicResource T.Sep}" VerticalAlignment="Bottom" Margin="6,0"/>
 
                 <!-- System tray: an overflow chevron, then the icons pinned to the dock -->

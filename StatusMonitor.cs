@@ -169,21 +169,21 @@ internal static class StatusMonitor
     /// <summary>Foreground glyph for the network, drawn over a faint full-wifi glyph when on Wi-Fi.</summary>
     public static string NetworkGlyph(NetworkStatus n) => n.Kind switch
     {
-        NetworkKind.Wifi when !n.Internet => "",
-        NetworkKind.Wifi => n.SignalPercent switch { >= 75 => "", >= 50 => "", >= 25 => "", _ => "" },
-        NetworkKind.Ethernet => n.Internet ? "" : "",
-        _ => "",
+        NetworkKind.Wifi when !n.Internet => "\uEB5E",
+        NetworkKind.Wifi => n.SignalPercent switch { >= 75 => "\uE701", >= 50 => "\uE874", >= 25 => "\uE873", _ => "\uE872" },
+        NetworkKind.Ethernet => n.Internet ? "\uE839" : "\uF384",
+        _ => "\uF384",
     };
 
     public static string VolumeGlyph(VolumeStatus v) =>
-        v.Muted || !v.HasDevice ? "" : v.Percent switch { 0 => "", < 34 => "", < 67 => "", _ => "" };
+        v.Muted || !v.HasDevice ? "\uE74F" : v.Percent switch { 0 => "\uE992", < 34 => "\uE993", < 67 => "\uE994", _ => "\uE995" };
 
     public static string BatteryGlyph(BatteryStatus b)
     {
         int level = (int)Math.Round(b.Percent / 10.0); // 0..10
         if (b.Charging || (b.PluggedIn && b.Percent < 100))
-            return level >= 10 ? "" : ((char)(0xE85A + level)).ToString();
-        return level >= 10 ? "" : ((char)(0xE850 + level)).ToString();
+            return level >= 10 ? "\uE83E" : ((char)(0xE85A + level)).ToString();
+        return level >= 10 ? "\uE83F" : ((char)(0xE850 + level)).ToString();
     }
 
     public static string Describe(NetworkStatus n, VolumeStatus v, BatteryStatus b)

@@ -63,6 +63,42 @@ internal static class IconLoader
         catch { return null; }
     }
 
+    static ImageSource? shield;
+
+    /// <summary>Windows' administrator shield, for the UAC prompt.</summary>
+    public static ImageSource? Shield()
+    {
+        if (shield != null) return shield;
+        var info = new SHSTOCKICONINFO { cbSize = (uint)Marshal.SizeOf<SHSTOCKICONINFO>() };
+        if (SHGetStockIconInfo(77 /* SIID_SHIELD */, 0x100 /* SHGSI_ICON, large */, ref info) != 0 || info.hIcon == IntPtr.Zero)
+            return null;
+        try
+        {
+            var src = Imaging.CreateBitmapSourceFromHIcon(info.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+            src.Freeze();
+            return shield = src;
+        }
+        finally { DestroyIcon(info.hIcon); }
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct SHSTOCKICONINFO
+    {
+        public uint cbSize;
+        public IntPtr hIcon;
+        public int iSysImageIndex, iIcon;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szPath;
+    }
+
+    [DllImport("shell32.dll")] static extern int SHGetStockIconInfo(uint siid, uint flags, ref SHSTOCKICONINFO info);
+    [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr icon);
+
+    /// <summary>
+    /// Drops the 256 px original once the sizes the dock draws are cached (it's re-read from the shell
+    /// if another size is ever needed, e.g. after the icon size setting changes).
+    /// </summary>
+    public static void ReleaseSource(string path) => Sources.Remove(path);
+
     /// <summary>Drops every cached size of an app's icon, once the app has left the dock.</summary>
     public static void Forget(string path)
     {

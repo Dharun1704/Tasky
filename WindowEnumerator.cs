@@ -1,18 +1,26 @@
+using System.Diagnostics;
+using System.IO;
+
 namespace Tasky;
 
-/// <param name="Aumid">App User Model ID for packaged (Store/MSIX) apps, whose exe has no usable icon.</param>
-internal sealed record AppWindow(IntPtr Hwnd, string Title, string ExePath, string? Aumid)
+/// <param name="Aumid">App User Model ID: for packaged (Store/MSIX) apps and installed web apps.</param>
+/// <param name="Shortcut">A Start menu shortcut that stands for the app, when its exe can't name itself (games).</param>
+internal sealed record AppWindow(IntPtr Hwnd, string Title, string ExePath, string? Aumid, string? Shortcut = null)
 {
-    /// <summary>What windows are grouped by, and what a pin of this app matches.</summary>
-    public string GroupKey => Aumid ?? ExePath;
+    /// <summary>
+    /// What windows are grouped by, and what a pin of this app matches. A window whose program can't
+    /// be identified at all (a system process such as the UAC prompt) is grouped on its own.
+    /// </summary>
+    public string GroupKey => Aumid ?? Shortcut ?? (ExePath.Length > 0 ? ExePath : WindowKeyPrefix + Hwnd.ToInt64());
 
-    /// <summary>A packaged app must be launched through the Apps folder, not its exe.</summary>
-    public string LaunchPath => Aumid != null ? AppsFolder + Aumid : ExePath;
+    /// <summary>What to start for a new window: packaged apps through the Apps folder, games through their shortcut.</summary>
+    public string LaunchPath => Aumid != null ? AppsFolder + Aumid : Shortcut ?? ExePath;
 
     public const string AppsFolder = @"shell:AppsFolder\";
+    public const string WindowKeyPrefix = "window:";
 }
 
-/// <summary>Finds the windows that belong on a taskbar (roughly the Alt+Tab rules).</summary>
+/// <summary>Finds the windows that belong on a taskbar (roughly the Alt+Tab rules) and works out which app each is.</summary>
 internal static class WindowEnumerator
 {
     static readonly HashSet<string> ExcludedClasses = new(StringComparer.Ordinal)
@@ -26,28 +34,94 @@ internal static class WindowEnumerator
     /// </summary>
     static readonly Dictionary<IntPtr, (string Path, string? Aumid)> FrameContent = new();
 
-    /// <summary>App windows in z-order, topmost (most recently used) first.</summary>
-    public static List<AppWindow> GetAppWindows(uint ownPid)
+    /// <summary>Exe path and package ID per process, looked up once instead of on every refresh.</summary>
+    static readonly Dictionary<uint, (string? Path, string? Aumid)> ProcessInfo = new();
+
+    /// <summary>The app ID each window declares, with when it was read (an empty answer is asked again later).</summary>
+    static readonly Dictionary<IntPtr, (string? Id, DateTime At)> WindowIds = new();
+
+    /// <summary>
+    /// App windows in z-order, topmost (most recently used) first. <paramref name="announced"/> are
+    /// windows Windows told us belong on the taskbar (via the shell hook) even though they're hidden:
+    /// the background UAC prompt is one.
+    /// </summary>
+    public static List<AppWindow> GetAppWindows(uint ownPid, IReadOnlySet<IntPtr> announced)
     {
         var list = new List<AppWindow>();
+        var seenPids = new HashSet<uint>();
         Native.EnumWindows((h, _) =>
         {
-            if (IsAppWindow(h, ownPid) && GetProcess(h) is var (pid, path, isFrame))
-            {
-                var aumid = Native.GetAppUserModelId(pid);
-                if (isFrame)
-                {
-                    if (aumid != null) FrameContent[h] = (path, aumid);
-                    else if (FrameContent.TryGetValue(h, out var seen)) (path, aumid) = seen;
-                    else aumid = Native.GetWindowAppUserModelId(h); // frames carry the app's ID too
-                }
-                list.Add(new AppWindow(h, Native.GetText(h), path, aumid));
-            }
+            if (!IsAppWindow(h, ownPid, announced)) return true;
+            Native.GetWindowThreadProcessId(h, out uint pid);
+            seenPids.Add(pid);
+            list.Add(Identify(h, pid));
             return true;
         }, IntPtr.Zero);
 
         foreach (var gone in FrameContent.Keys.Where(k => !Native.IsWindow(k)).ToList()) FrameContent.Remove(gone);
+        foreach (var gone in WindowIds.Keys.Where(k => !Native.IsWindow(k)).ToList()) WindowIds.Remove(gone);
+        foreach (var gone in ProcessInfo.Keys.Where(p => !seenPids.Contains(p)).ToList()) ProcessInfo.Remove(gone);
         return list;
+    }
+
+    static AppWindow Identify(IntPtr h, uint pid)
+    {
+        var title = Native.GetText(h);
+        var (path, aumid) = Process(pid);
+
+        // Store apps are hosted by ApplicationFrameHost; the real app owns a child window.
+        if (path != null && path.EndsWith("ApplicationFrameHost.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            var content = FrameChild(h, pid);
+            if (content is { } c)
+            {
+                (path, aumid) = Process(c);
+                if (aumid != null) FrameContent[h] = (path ?? "", aumid);
+            }
+            else if (FrameContent.TryGetValue(h, out var seen)) (path, aumid) = seen;
+            aumid ??= WindowId(h); // frames carry the app's ID too
+        }
+
+        // Installed web apps (Netflix, YouTube...) run inside the browser's process but declare their
+        // own app ID on their window. Browser windows declare one too ("MSEdge"), so only IDs that
+        // name an installed app count: a package's "family!app" or a Chromium web app's "_crx_".
+        if (WindowId(h) is { } windowId && (windowId.Contains('!') || windowId.Contains("_crx_", StringComparison.OrdinalIgnoreCase)))
+            aumid = windowId;
+
+        // Games and the like whose exe has no name: use the Start menu shortcut named like the window.
+        string? shortcut = null;
+        if (aumid == null && path != null && !ExeNames.HasName(path)) shortcut = Shortcuts.Named(title);
+
+        return new AppWindow(h, title, path ?? "", aumid, shortcut);
+    }
+
+    static (string? Path, string? Aumid) Process(uint pid)
+    {
+        if (!ProcessInfo.TryGetValue(pid, out var info))
+            ProcessInfo[pid] = info = (Native.GetProcessPath(pid), Native.GetAppUserModelId(pid));
+        return info;
+    }
+
+    static string? WindowId(IntPtr h)
+    {
+        if (WindowIds.TryGetValue(h, out var known) && (known.Id != null || DateTime.UtcNow - known.At < TimeSpan.FromSeconds(10)))
+            return known.Id;
+        var id = Native.GetWindowAppUserModelId(h);
+        WindowIds[h] = (id, DateTime.UtcNow);
+        return id;
+    }
+
+    static uint? FrameChild(IntPtr frame, uint framePid)
+    {
+        uint? found = null;
+        Native.EnumChildWindows(frame, (child, _) =>
+        {
+            Native.GetWindowThreadProcessId(child, out uint childPid);
+            if (childPid == framePid) return true;
+            found = childPid;
+            return false;
+        }, IntPtr.Zero);
+        return found;
     }
 
     /// <summary>Whether any app window (not minimized, on this desktop) has its visible frame inside <paramref name="area"/>.</summary>
@@ -56,7 +130,7 @@ internal static class WindowEnumerator
         bool found = false;
         Native.EnumWindows((h, _) =>
         {
-            if (Native.IsIconic(h) || !IsAppWindow(h, ownPid)) return true;
+            if (Native.IsIconic(h) || !IsAppWindow(h, ownPid, None)) return true;
             // The visible frame, without the invisible resize borders GetWindowRect includes.
             if (Native.DwmGetWindowAttribute(h, Native.DWMWA_EXTENDED_FRAME_BOUNDS, out Native.RECT r, 16) != 0
                 && !Native.GetWindowRect(h, out r))
@@ -67,13 +141,15 @@ internal static class WindowEnumerator
         return found;
     }
 
-    static bool IsAppWindow(IntPtr h, uint ownPid)
+    static readonly HashSet<IntPtr> None = new();
+
+    static bool IsAppWindow(IntPtr h, uint ownPid, IReadOnlySet<IntPtr> announced)
     {
-        if (!Native.IsWindowVisible(h)) return false;
+        if (!Native.IsWindowVisible(h) && !announced.Contains(h)) return false;
 
         long ex = Native.GetWindowLongPtr(h, Native.GWL_EXSTYLE).ToInt64();
         bool appWindow = (ex & Native.WS_EX_APPWINDOW) != 0;
-        if (!appWindow)
+        if (!appWindow && !announced.Contains(h))
         {
             if (Native.GetWindow(h, Native.GW_OWNER) != IntPtr.Zero) return false;
             if ((ex & Native.WS_EX_TOOLWINDOW) != 0) return false;
@@ -91,30 +167,59 @@ internal static class WindowEnumerator
         return pid != ownPid;
     }
 
-    /// <summary>The process that owns the window's content, its exe path, and whether it's a Store-app frame.</summary>
-    static (uint Pid, string Path, bool IsFrame)? GetProcess(IntPtr h)
-    {
-        Native.GetWindowThreadProcessId(h, out uint pid);
-        var path = Native.GetProcessPath(pid);
-        if (path == null) return null;
-        uint owner = pid;
+    /// <summary>
+    /// The User Account Control prompt. When an app that isn't in front asks for permission, Windows
+    /// shows only a taskbar button for it (a hidden window of consent.exe) until it's clicked.
+    /// </summary>
+    public static bool IsUac(AppWindow w) =>
+        w.ExePath.EndsWith(@"\consent.exe", StringComparison.OrdinalIgnoreCase)
+        || Native.GetClass(w.Hwnd).Contains("Secure UAP", StringComparison.OrdinalIgnoreCase);
+}
 
-        // Store apps are hosted by ApplicationFrameHost; the real app owns a child window.
-        bool isFrame = path.EndsWith("ApplicationFrameHost.exe", StringComparison.OrdinalIgnoreCase);
-        if (isFrame)
+/// <summary>Whether an exe carries a name of its own (file description or product name).</summary>
+internal static class ExeNames
+{
+    static readonly Dictionary<string, bool> Known = new(StringComparer.OrdinalIgnoreCase);
+
+    public static bool HasName(string exePath)
+    {
+        if (Known.TryGetValue(exePath, out var has)) return has;
+        try
         {
-            Native.EnumChildWindows(h, (child, _) =>
-            {
-                Native.GetWindowThreadProcessId(child, out uint childPid);
-                if (childPid != pid && Native.GetProcessPath(childPid) is { } real)
-                {
-                    path = real;
-                    owner = childPid;
-                    return false;
-                }
-                return true;
-            }, IntPtr.Zero);
+            var info = FileVersionInfo.GetVersionInfo(exePath);
+            has = !string.IsNullOrWhiteSpace(info.FileDescription) || !string.IsNullOrWhiteSpace(info.ProductName);
         }
-        return (owner, path, isFrame);
+        catch { has = true; } // unreadable: leave it to the usual naming
+        return Known[exePath] = has;
+    }
+}
+
+/// <summary>Start menu shortcuts by name, re-read every few minutes as apps are installed.</summary>
+internal static class Shortcuts
+{
+    static Dictionary<string, string> byName = new(StringComparer.OrdinalIgnoreCase);
+    static DateTime builtAt;
+
+    public static string? Named(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return null;
+        if (DateTime.UtcNow - builtAt > TimeSpan.FromMinutes(5)) Build();
+        return byName.GetValueOrDefault(title.Trim());
+    }
+
+    static void Build()
+    {
+        var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in new[] { Environment.SpecialFolder.Programs, Environment.SpecialFolder.CommonPrograms })
+        {
+            try
+            {
+                foreach (var lnk in Directory.EnumerateFiles(Environment.GetFolderPath(root), "*.lnk", SearchOption.AllDirectories))
+                    index.TryAdd(Path.GetFileNameWithoutExtension(lnk), lnk);
+            }
+            catch (Exception ex) { Log.Error(ex, "reading Start menu shortcuts"); }
+        }
+        byName = index;
+        builtAt = DateTime.UtcNow;
     }
 }

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -7,11 +7,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.1.0</Version>
     <Product>Tasky</Product>
     <Description>A floating dock for Windows 11</Description>
     <Copyright>Dharun Vaibhav U</Copyright>
+    <Version>1.2.0</Version>
+    <!-- A dock runs all day: keep the memory footprint small. Workstation GC without the background
+         GC thread, and the runtime's "conserve memory" mode (compacts more, grows the heap less). -->
+    <ServerGarbageCollector>false</ServerGarbageCollector>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
+
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
+  </ItemGroup>
 
   <!-- `dotnet publish` makes a single Tasky.exe (it still needs the .NET 10 Desktop Runtime).
        Only when publishing, so day-to-day builds keep their usual output folder. -->
@@ -21,6 +29,8 @@
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <DebugType>embedded</DebugType>
+    <!-- Compiled ahead of time: less start-up work and less JIT memory. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>

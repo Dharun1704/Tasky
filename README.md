@@ -5,10 +5,11 @@ A floating dock for Windows 11. It sits at the bottom, top, left or right of the
 ![Tasky's dock: Start, pinned and running apps with one magnified under the cursor, the tray arrow, Quick Settings icons, the clock and the settings gear](docs/dock.png)
 
 - **Apps:** pinned and running apps in one row. Icons grow as the mouse passes over them, a dot marks running apps and a bar marks the one in front. Drag pinned icons to reorder them.
+- **Lots of apps:** when they don't all fit, the icons shrink to fit the screen, and past that the extra running apps move into a **…** menu.
 - **Previews:** hover a running app to see live thumbnails of its windows; click one to switch to it, or close it from there.
 - **Recent files:** right-click an app for the documents and folders you used in it recently.
 - **Glass:** a rounded, see-through dock with real blur behind it, in a dark or light theme (or matching Windows).
-- **Out of the way:** keep windows above the dock, let it hide whenever a window overlaps it, or keep it always on top. It also steps aside for fullscreen games and videos.
+- **Out of the way:** keep windows above the dock, let it hide whenever a window overlaps it, or keep it always on top. It also steps aside for fullscreen games and videos, and comes back out when an app flashes for attention or Windows asks for permission (User Account Control).
 - **Tray:** apps' tray icons (OneDrive, Discord, Bluetooth…) live in the dock. Pin the ones you use; the rest wait behind the arrow.
 - **Windows bits:** Start button, live Wi-Fi, volume and battery icons that open Quick Settings, and a clock that opens the notification center.
 - **Settings:** sliders for icon size, spacing, magnification, corner roundness, opacity, clock size, distance from the screen edge and animation speed, plus which display the dock lives on. Changes show on the dock as you make them.
