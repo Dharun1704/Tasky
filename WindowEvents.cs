@@ -29,7 +29,7 @@ internal sealed class WindowEvents : IDisposable
     public event Action? WindowsChanged;
     /// <summary>A window moved, resized or changed focus: what overlaps the dock may differ.</summary>
     public event Action? LayoutChanged;
-    /// <summary>A top-level window was just shown (used to catch Explorer bringing its taskbar back).</summary>
+    /// <summary>A top-level window was just shown or uncloaked (Explorer bringing its taskbar back, Start opening).</summary>
     public event Action<IntPtr>? WindowShown;
 
     public WindowEvents()
@@ -55,7 +55,7 @@ internal sealed class WindowEvents : IDisposable
         if (hwnd == IntPtr.Zero || idObject != OBJID_WINDOW || idChild != CHILDID_SELF) return;
         if (GetAncestor(hwnd, 2 /* GA_ROOT */) != hwnd) return;
 
-        if (evt == EVENT_OBJECT_SHOW) WindowShown?.Invoke(hwnd);
+        if (evt is EVENT_OBJECT_SHOW or EVENT_OBJECT_UNCLOAKED) WindowShown?.Invoke(hwnd);
         LayoutChanged?.Invoke();
         if (evt is EVENT_SYSTEM_MOVESIZEEND) return;
         WindowsChanged?.Invoke();

@@ -107,7 +107,7 @@ WPF is Microsoft's retained-mode UI framework. You describe a tree of elements; 
 - **DIPs, not pixels:** sizes are in device-independent pixels (1/96 inch). At 150% scaling, 1 DIP = 1.5 px. Win32 calls use pixels, so Tasky multiplies or divides by `VisualTreeHelper.GetDpi(this).DpiScaleX` at the boundary.
 - **Data binding:** `Width="{Binding SlotWidth}"` reads `SlotWidth` from the element's `DataContext` object. When that object raises `PropertyChanged` (`INotifyPropertyChanged`), WPF re-reads it and updates the UI. `DockItem` works this way: change `item.Size`, and the icon resizes.
 - **Lists:** `ItemsControl` + `ItemsSource` + `DataTemplate`. Give it a list of `DockItem`s and a template, and it creates one visual per item. `ObservableCollection<T>` tells it when items are added, removed or moved.
-- **Styles, templates and triggers:** a `Style` sets properties on every element of a type, and a `ControlTemplate` replaces a control's visuals entirely (Tasky's menus, sliders and toggles are restyled this way in `App.xaml`). Triggers change properties when a condition holds, e.g. hover.
+- **Styles, templates and triggers:** a `Style` sets properties on every element of a type, and a `ControlTemplate` replaces a control's visuals entirely (Tasky's menus are restyled this way in `App.xaml`, the settings window's sliders and toggles in `SettingsWindow.xaml`). Triggers change properties when a condition holds, e.g. hover.
 - **Resources:** named values in a dictionary. `{StaticResource X}` is looked up once; `{DynamicResource X}` re-reads it when it changes, which is how the theme switches live (`Theme.cs` swaps the `T.*` brushes).
 - **The UI thread:** WPF objects may only be touched on the thread that created them, which runs a Win32 message loop.
   - `DispatcherTimer` ticks on that thread, like `SetTimer`.
@@ -128,7 +128,7 @@ WPF is Microsoft's retained-mode UI framework. You describe a tree of elements; 
 | **Dock** (`MainWindow`) | A transparent, topmost, layered WPF window as wide as the screen (or as tall, for a side dock). It never takes focus (`WS_EX_NOACTIVATE`) and stays out of Alt+Tab (`WS_EX_TOOLWINDOW`). Holds the pill, the icons, the tray, the clock and the name label. |
 | **Blur backdrop** (`BackdropWindow`) | A plain Win32 window placed exactly under the pill, with acrylic blur. It exists because DWM blur on the layered dock window would blur the whole transparent rectangle, not just the pill. The dock is *owned* by it, which keeps the dock above it in z-order. |
 | **Previews** (`PreviewWindow`) | Shows live DWM thumbnails of an app's windows on hover. A normal, non-layered window, because DWM can't draw thumbnails into a layered one. |
-| **Settings** (`SettingsWindow`) | An ordinary window with sliders and toggles; changes apply to the dock as you make them. |
+| **Settings** (`SettingsWindow`) | A Windows 11 Settings-style window (Mica backdrop, sidebar pages, one card per setting); changes apply to the dock as you make them. |
 | **Tray** (ManagedShell's `TrayService`) | A hidden window with the class name `Shell_TrayWnd`, kept ahead of Explorer's. Apps' `Shell_NotifyIcon` calls find it first, so their tray icons come to Tasky. |
 | **Explorer's taskbar** | Still running. Tasky hides it when "Hide the Windows taskbar" is on, and restores it on exit. |
 
@@ -221,6 +221,7 @@ Tasky is mostly event-driven, which is what keeps its CPU use low.
 - **Fullscreen:** over a fullscreen app (not just maximized), the whole dock fades out, unless a permission prompt is open.
 - **`KeepOnTop`:** re-asserts `HWND_TOPMOST`, because a monitor-sized foreground window can end up above "topmost" windows once the taskbar is hidden.
 - **`AlignShellFlyout`:** moves Quick Settings above the dock's status icons (bottom dock only; Windows lays that panel out from its window's top), and puts the notification center back in its default place.
+- **`AlignStartMenu`:** Start is drawn at the bottom of a full-width window that ends just above Windows' hidden 48 px taskbar, so a big dock would cover it. When that window uncloaks, it and the search-box window over it are each lifted by the same amount from their default spots, so Start ends a dock gap above the pill (bottom dock only). `ClearOfDock` does the same for Tasky's own menus and tray popup, which also close Start before opening (it would stay in front of them).
 - **Shell UI:** `IsShellUi` recognises Start, Search, Quick Settings and the notification center by process name, so they reveal the dock instead of counting as overlapping windows.
 
 ## The system tray (`TrayHost.cs`, `MainWindow.Tray.cs`)
@@ -259,7 +260,7 @@ Windows' User Account Control prompt runs as `consent.exe` exactly while a promp
 - **App menus** list recent documents, then the app's windows, then New window, Pin/Unpin and Close.
 - **Recent documents** come from `IApplicationDocumentLists` for the app's AUMID. Unpackaged apps use the implicit AUMID Windows derives from the exe path (`JumpList.ImplicitAppId`).
 - **The dock menu** has Dock settings, the three modes, Show tray icons, Hide Windows taskbar and Exit.
-- **The settings window** writes to the shared `Settings` object and calls the dock's `Apply*` methods. Slider changes are throttled to one re-layout per 30 ms, and saving to disk is debounced to 400 ms.
+- **The settings window** writes to the shared `Settings` object and calls the dock's `Apply*` methods. Slider changes are throttled to one re-layout per 30 ms, and saving to disk is debounced to 400 ms. Each setting is a `SettingRow` card (icon, title, description, control on the right). The sidebar shows one page at a time. Colours are window resources named `S.*`, set in `ApplyTheme` from the dock's dark/light theme. Mica comes from `DWMWA_SYSTEMBACKDROP_TYPE` with the frame extended over a transparent client area.
 - **Pins** are stored as paths: an exe, a `.lnk`, or `shell:AppsFolder\<AUMID>` for packaged and web apps.
   - A shortcut normally stands for the exe it targets.
   - A shortcut *with arguments* (a game through its launcher) stays its own app.
@@ -295,7 +296,7 @@ Errors go to `%APPDATA%\Tasky\tasky.log`.
 
 | File | Contents |
 | --- | --- |
-| `App.xaml` | Global styles: menus, tooltips, the settings window's sliders, toggles and buttons, the dock buttons' hover |
+| `App.xaml` | Global styles: menus, tooltips, the dock buttons' hover |
 | `App.xaml.cs` | Start-up: single instance, crash handlers, accent colour, creating the dock |
 | `MainWindow.xaml` | The dock's visual tree: pill, Start, app list template, overflow button, tray, status capsule, settings button, tray popup, name label |
 | `MainWindow.xaml.cs` | The dock's fields, constructor, start-up, `WndProc`, the 1 s heartbeat, taskbar hiding and `Cleanup` |
@@ -321,7 +322,8 @@ Errors go to `%APPDATA%\Tasky\tasky.log`.
 | `Shell.cs` | `ExplorerAppBar`, `AppBar`, `WindowsTaskbar`, `StartMenuShortcut`, `AutoStart` |
 | `Native.cs` | Win32, DWM and shell declarations and small helpers |
 | `Settings.cs` | Settings model, JSON load and save, and `Log` |
-| `SettingsWindow.xaml(.cs)` | The settings window |
+| `SettingsWindow.xaml(.cs)` | The settings window: its control styles, pages and theme colours |
+| `SettingRow.cs` | One settings card: icon, title, description and a control |
 | `app.manifest` | Per-monitor DPI awareness and the Windows 10/11 compatibility ID |
 | `Tasky.csproj` | Build settings: WPF, .NET 10, single-file ReadyToRun publish, memory-saving GC settings, ManagedShell |
 
@@ -356,7 +358,7 @@ Errors go to `%APPDATA%\Tasky\tasky.log`.
 **Adding a setting:**
 
 1. Add a property with a default to `Settings.cs`. JSON picks it up automatically, and old files get the default.
-2. Add a control to `SettingsWindow.xaml` (copy a nearby slider or toggle).
+2. Add a `SettingRow` to a page in `SettingsWindow.xaml` (copy a nearby slider or toggle row).
 3. In `SettingsWindow.xaml.cs`: load it in `LoadValues`, hook it up in `Wire` (`Look(...)` for things that change the dock's look, `Toggle(...)` for switches), and add a label in `UpdateLabels` if it shows a value.
 4. Use it in `MainWindow`. If it affects layout, `ApplyLayout()` picks it up via the `Look` path.
 
@@ -378,7 +380,7 @@ This gives a single `publish\Tasky.exe`, which needs the .NET 10 Desktop Runtime
 
 ## Known limitations (and why)
 
-- **Undocumented behaviour:** the blur, tray takeover, hiding Explorer's taskbar and moving Quick Settings all rely on Windows behaviour Microsoft doesn't document. Insider builds can break them.
+- **Undocumented behaviour:** the blur, tray takeover, hiding Explorer's taskbar and moving Start and Quick Settings all rely on Windows behaviour Microsoft doesn't document. Insider builds can break them.
 - **Flashing apps:** on current Windows 11 builds, Windows doesn't send "flashing" to non-Explorer shells, so apps flashing for attention can't bring the dock out. The UAC prompt is handled separately (see above).
 - **Recent documents only:** apps' custom jump-list tasks are only readable by Explorer.
 - **App bars:** while Tasky's tray is on, other apps that reserve screen space can't, because their messages reach Tasky's tray window first.

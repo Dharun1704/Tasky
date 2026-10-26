@@ -173,9 +173,17 @@ public partial class MainWindow
         if (activeMenu is { IsOpen: true }) activeMenu.IsOpen = false; // one menu at a time
         activeMenu = menu; // keeps an auto-hiding dock on screen while it's up
         menu.Opened += (_, _) => PopupOpening();
-        menu.PlacementTarget = target ?? Pill;
+        target ??= Pill;
+        menu.PlacementTarget = target;
         menu.Placement = MenuPlacement;
-        menu.IsOpen = true;
+        var offset = ClearOfDock(target, MenuShadowRoom);
+        menu.HorizontalOffset = offset.X;
+        menu.VerticalOffset = offset.Y;
+        // Start would stay in front of it, so it's closed first.
+        AfterPanelsClose(() =>
+        {
+            if (activeMenu == menu) menu.IsOpen = true;
+        });
     }
 
     /// <summary>A menu row: <paramref name="icon"/> is a glyph or image; <paramref name="active"/> marks the window in front.</summary>

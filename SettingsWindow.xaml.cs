@@ -1,6 +1,8 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 
 namespace Tasky;
@@ -23,15 +25,121 @@ public partial class SettingsWindow : Window
         save.Tick += (_, _) => { save.Stop(); settings.Save(); };
         // Sliders fire on every pixel of a drag; re-laying out the dock at most every 30 ms keeps it smooth.
         relayout.Tick += (_, _) => { relayout.Stop(); dock.ApplyLook(); };
-        SourceInitialized += (_, _) =>
-        {
-            int dark = 1; // dark title bar to match
-            Native.DwmSetWindowAttribute(new WindowInteropHelper(this).Handle, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, ref dark, sizeof(int));
-        };
+        SourceInitialized += (_, _) => UseMica();
         Closed += (_, _) => settings.Save();
 
+        ApplyTheme();
         LoadValues();
         Wire();
+        WireNavigation();
+    }
+
+    // ---- Look ---------------------------------------------------------------------------------
+
+    [DllImport("dwmapi.dll")] static extern int DwmExtendFrameIntoClientArea(IntPtr h, ref Margins margins);
+    struct Margins { public int Left, Right, Top, Bottom; }
+
+    const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20, DWMWA_SYSTEMBACKDROP_TYPE = 38, DWMSBT_MAINWINDOW = 2;
+    bool mica;
+
+    /// <summary>
+    /// Windows 11's Mica material behind the whole window, title bar included, like Windows' own
+    /// Settings: the frame is extended over the client area and WPF draws on a transparent
+    /// background. Older Windows keeps a plain background.
+    /// </summary>
+    void UseMica()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        SetDarkTitleBar(hwnd);
+        int type = DWMSBT_MAINWINDOW;
+        if (Native.DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref type, sizeof(int)) != 0) return;
+        var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+        if (DwmExtendFrameIntoClientArea(hwnd, ref margins) != 0) return;
+        HwndSource.FromHwnd(hwnd).CompositionTarget.BackgroundColor = Colors.Transparent;
+        mica = true;
+        ApplyTheme();
+    }
+
+    void SetDarkTitleBar(IntPtr hwnd)
+    {
+        int dark = Theme.IsLight ? 0 : 1; // also picks the dark or light Mica
+        Native.DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+    }
+
+    /// <summary>The window's colours ("S.*"), following the dock's dark/light theme.</summary>
+    void ApplyTheme()
+    {
+        bool light = Theme.IsLight;
+        void Set(string key, uint argb) => Resources[key] = Brush(Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
+
+        // The app's accent is lifted for dark backgrounds (see App.ReadAccent); light ones get Windows' own.
+        var accent = ((SolidColorBrush)Application.Current.Resources["AccentBrush"]).Color;
+        static byte Unlift(byte lifted) => (byte)Math.Clamp((lifted - 102) / 0.6, 0, 255);
+        Resources["S.Accent"] = Brush(light ? Color.FromRgb(Unlift(accent.R), Unlift(accent.G), Unlift(accent.B)) : accent);
+
+        if (light)
+        {
+            Set("S.Window", mica ? 0x00000000 : 0xFFF3F3F3);
+            Set("S.Fg", 0xE4000000);
+            Set("S.Sub", 0x9E000000);
+            Set("S.Card", 0xB3FFFFFF);
+            Set("S.CardStroke", 0x0F000000);
+            Set("S.NavHover", 0x09000000);
+            Set("S.NavSelected", 0x0F000000);
+            Set("S.SliderRest", 0x72000000);
+            Set("S.Thumb", 0xFFFFFFFF);
+            Set("S.ToggleStroke", 0x9E000000);
+            Set("S.ToggleOff", 0x05000000);
+            Set("S.OnAccent", 0xFFFFFFFF);
+            Set("S.SegmentsBg", 0x08000000);
+            Set("S.SegmentOn", 0xFFFFFFFF);
+            Set("S.Button", 0xB3FFFFFF);
+            Set("S.ButtonHover", 0xF2F6F6F6);
+            Set("S.Scroll", 0x72000000);
+        }
+        else
+        {
+            Set("S.Window", mica ? 0x00000000 : 0xFF202020);
+            Set("S.Fg", 0xFFFFFFFF);
+            Set("S.Sub", 0xC5FFFFFF);
+            Set("S.Card", 0x0DFFFFFF);
+            Set("S.CardStroke", 0x17FFFFFF);
+            Set("S.NavHover", 0x0DFFFFFF);
+            Set("S.NavSelected", 0x17FFFFFF);
+            Set("S.SliderRest", 0x8BFFFFFF);
+            Set("S.Thumb", 0xFF454545);
+            Set("S.ToggleStroke", 0xCCFFFFFF);
+            Set("S.ToggleOff", 0x0AFFFFFF);
+            Set("S.OnAccent", 0xFF000000);
+            Set("S.SegmentsBg", 0x0AFFFFFF);
+            Set("S.SegmentOn", 0x2EFFFFFF);
+            Set("S.Button", 0x0FFFFFFF);
+            Set("S.ButtonHover", 0x1AFFFFFF);
+            Set("S.Scroll", 0x8BFFFFFF);
+        }
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd != IntPtr.Zero) SetDarkTitleBar(hwnd);
+    }
+
+    static SolidColorBrush Brush(Color c)
+    {
+        var b = new SolidColorBrush(c);
+        b.Freeze();
+        return b;
+    }
+
+    /// <summary>The sidebar shows one page at a time.</summary>
+    void WireNavigation()
+    {
+        foreach (var (nav, page) in new[] { (NavAppearance, PageAppearance), (NavDock, PageDock), (NavBehavior, PageBehavior),
+                                            (NavSystem, PageSystem), (NavAbout, PageAbout) })
+            nav.Checked += (_, _) =>
+            {
+                foreach (var p in new[] { PageAppearance, PageDock, PageBehavior, PageSystem, PageAbout })
+                    p.Visibility = p == page ? Visibility.Visible : Visibility.Collapsed;
+                Scroller.ScrollToTop();
+            };
+        NavAppearance.IsChecked = true;
     }
 
     /// <summary>Picks up changes made from the dock's right-click menu.</summary>
@@ -71,6 +179,7 @@ public partial class SettingsWindow : Window
         LoadMonitors();
         var version = typeof(SettingsWindow).Assembly.GetName().Version;
         VersionText.Text = $"Tasky {version?.ToString(3)}";
+        SidebarVersion.Text = $"Version {version?.ToString(3)}";
         loading = false;
         UpdateLabels();
     }
@@ -150,6 +259,7 @@ public partial class SettingsWindow : Window
                 if (loading) return;
                 settings.Theme = theme;
                 dock.ApplyThemeSetting();
+                ApplyTheme();
                 Changed(look: false);
             };
 
@@ -205,7 +315,9 @@ public partial class SettingsWindow : Window
         MagnifyValue.Text = $"{settings.MagnifyScale:0.00}×";
         MagnifyScale.IsEnabled = settings.Magnify;
         RoundnessValue.Text = $"{settings.CornerRadius:0} px";
-        RoundnessHint.Visibility = settings.Blur ? Visibility.Visible : Visibility.Collapsed;
+        RoundnessRow.Description = settings.Blur
+            ? "Blur limits this to 0, 4 or 8 px. Turn blur off for any roundness."
+            : "How round the dock's corners are.";
         OpacityValue.Text = $"{settings.BackgroundOpacity * 100:0}%";
         GapValue.Text = $"{settings.EdgeGap:0} px";
         ClockSizeValue.Text = $"{settings.ClockFontSize:0.#} px";
@@ -236,8 +348,6 @@ public partial class SettingsWindow : Window
         dock.ApplyLook();
         settings.Save();
     }
-
-    void OnDone(object sender, RoutedEventArgs e) => Close();
 
     void OnGitHub(object sender, RoutedEventArgs e) => Open("https://github.com/Dharun1704/Tasky");
 

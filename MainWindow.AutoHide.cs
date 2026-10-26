@@ -48,6 +48,7 @@ public partial class MainWindow
         }
         SetAutoHidden(HideAfterDelay(hide));
         AlignShellFlyout();
+        if (IsShellUi(Native.GetForegroundWindow())) AlignStartMenu();
     }
 
     static readonly HashSet<string> ShellUiProcesses = new(StringComparer.OrdinalIgnoreCase)
@@ -117,6 +118,50 @@ public partial class MainWindow
 
         if (Math.Abs(r.Left - x) <= 1 && Math.Abs(r.Top - y) <= 1 && Math.Abs(r.Height - height) <= 1) return;
         Native.SetWindowPos(fg, IntPtr.Zero, x, y, r.Width, height, Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
+    }
+
+    /// <summary>
+    /// Windows lays Start out at the bottom of a window that ends just above its own (hidden) 48px
+    /// taskbar, so a big or raised dock covers the bottom of it. Lift that window, and the search box
+    /// window laid over it, so Start ends a dock gap above the pill whatever the dock's size.
+    /// </summary>
+    void AlignStartMenu()
+    {
+        if (Edge != DockEdge.Bottom || pillRect.Width <= 0) return;
+        var start = VisibleShellWindow("StartMenuExperienceHost");
+        if (start == IntPtr.Zero || !Native.GetWindowRect(start, out var r)) return;
+        var monitor = DockMonitor().rcMonitor;
+        if (r.Right <= monitor.Left || r.Left >= monitor.Right) return; // Start is open on another screen
+
+        // Windows ends Start's window 48px above the screen bottom and the search box's at the bottom.
+        // Windows sometimes resets one but not the other, so each is lifted to its own spot.
+        double s = VisualTreeHelper.GetDpi(this).DpiScaleY;
+        int taskbar = (int)(48 * s);
+        int lift = Math.Max(0, monitor.Bottom - taskbar - (pillRect.Top - (int)(Gap * s)));
+        MoveBottomTo(start, r, monitor.Bottom - taskbar - lift);
+        var search = VisibleShellWindow("SearchHost");
+        if (search != IntPtr.Zero && Native.GetWindowRect(search, out var sr) && sr.Left < r.Right && sr.Right > r.Left)
+            MoveBottomTo(search, sr, monitor.Bottom - lift);
+    }
+
+    static void MoveBottomTo(IntPtr window, Native.RECT r, int bottom)
+    {
+        if (Math.Abs(r.Bottom - bottom) <= 1) return;
+        Native.SetWindowPos(window, IntPtr.Zero, r.Left, r.Top + bottom - r.Bottom, 0, 0,
+                            Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
+    }
+
+    /// <summary>The shown (not cloaked) app window of a shell process, such as Start's.</summary>
+    IntPtr VisibleShellWindow(string process)
+    {
+        for (var h = Native.FindWindowEx(IntPtr.Zero, IntPtr.Zero, "Windows.UI.Core.CoreWindow", null); h != IntPtr.Zero;
+             h = Native.FindWindowEx(IntPtr.Zero, h, "Windows.UI.Core.CoreWindow", null))
+        {
+            if (!Native.IsWindowVisible(h) || ProcessName(h) != process) continue;
+            if (Native.DwmGetWindowAttribute(h, Native.DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0 && cloaked != 0) continue;
+            return h;
+        }
+        return IntPtr.Zero;
     }
 
     /// <summary>

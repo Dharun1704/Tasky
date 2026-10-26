@@ -204,7 +204,15 @@ public partial class MainWindow
     void OnTrayMoreClick(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
-        TrayPopup.IsOpen = !TrayPopup.IsOpen;
+        if (TrayPopup.IsOpen)
+        {
+            TrayPopup.IsOpen = false;
+            return;
+        }
+        var offset = ClearOfDock(TrayMore, TrayPopupShadowRoom);
+        TrayPopup.HorizontalOffset = offset.X;
+        TrayPopup.VerticalOffset = offset.Y;
+        AfterPanelsClose(() => TrayPopup.IsOpen = true); // Start would stay in front of it
     }
 
     /// <summary>Notes what's in front and forgets clicks made so far, as a popup or menu opens.</summary>

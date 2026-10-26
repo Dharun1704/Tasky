@@ -229,6 +229,29 @@ public partial class MainWindow
         _ => PlacementMode.Top,
     };
 
+    // Transparent room around the visible box of a menu and of the tray popup, for the shadow
+    // (the Margin in their templates).
+    const double MenuShadowRoom = 12, TrayPopupShadowRoom = 10;
+    const double MenuGap = 8; // between the pill and a menu
+
+    /// <summary>
+    /// The offset that moves a menu placed against <paramref name="target"/> (a button inside the pill)
+    /// out to sit <see cref="MenuGap"/> clear of the pill itself, whatever the dock's size and edge.
+    /// </summary>
+    Vector ClearOfDock(UIElement target, double shadowRoom)
+    {
+        var at = target.TranslatePoint(new Point(0, 0), Pill);
+        var size = target.RenderSize;
+        double away = MenuGap - shadowRoom;
+        return Edge switch
+        {
+            DockEdge.Top => new Vector(0, Pill.ActualHeight - (at.Y + size.Height) + away),
+            DockEdge.Left => new Vector(Pill.ActualWidth - (at.X + size.Width) + away, 0),
+            DockEdge.Right => new Vector(-at.X - away, 0),
+            _ => new Vector(0, -at.Y - away),
+        };
+    }
+
     void Reposition()
     {
         if (hwnd == IntPtr.Zero || appBar == null) return;

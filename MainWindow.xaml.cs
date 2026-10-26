@@ -247,11 +247,18 @@ public partial class MainWindow : Window
     /// <summary>
     /// Explorer sometimes shows its taskbar again when Start opens (Start belongs to it, and an
     /// auto-hide taskbar reveals itself with Start). Hide it again the moment it's shown, rather than
-    /// on the next once-a-second check, so it at most blinks.
+    /// on the next once-a-second check, so it at most blinks. Start itself is lifted clear of the dock
+    /// as it appears.
     /// </summary>
     void OnWindowShown(IntPtr window)
     {
-        if (!settings.HideTaskbar || Native.GetClass(window) != "Shell_TrayWnd") return;
+        var cls = Native.GetClass(window);
+        if (cls == "Windows.UI.Core.CoreWindow")
+        {
+            AlignStartMenu();
+            return;
+        }
+        if (!settings.HideTaskbar || cls != "Shell_TrayWnd") return;
         Native.GetWindowThreadProcessId(window, out uint pid);
         if (pid != ownPid) WindowsTaskbar.SetVisible(false); // not our own tray window, which has the same class
     }
