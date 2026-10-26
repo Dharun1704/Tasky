@@ -1,3 +1,5 @@
+<img src="Assets/Tasky.png" width="96" alt="Tasky's icon: three app tiles on a shelf, the middle one magnified">
+
 # Tasky
 
 A floating dock for Windows 11. It sits at the bottom, top, left or right of the screen in place of the Windows taskbar, with your pinned and running apps, a system tray, Quick Settings and a clock.

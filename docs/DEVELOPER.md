@@ -325,6 +325,7 @@ Errors go to `%APPDATA%\Tasky\tasky.log`.
 | `SettingsWindow.xaml(.cs)` | The settings window: its control styles, pages and theme colours |
 | `SettingRow.cs` | One settings card: icon, title, description and a control |
 | `app.manifest` | Per-monitor DPI awareness and the Windows 10/11 compatibility ID |
+| `Assets/` | The app icon: `Tasky.ico` (every size, a flat version for 16-24 px), `Tasky.png`, their source images, and `make-icon.ps1`, which rebuilds both from the sources |
 | `Tasky.csproj` | Build settings: WPF, .NET 10, single-file ReadyToRun publish, memory-saving GC settings, ManagedShell |
 
 ---

@@ -7,6 +7,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The exe's icon (Explorer, Start menu shortcut, title bars, Alt+Tab). Assets\make-icon.ps1 builds it. -->
+    <ApplicationIcon>Assets\Tasky.ico</ApplicationIcon>
     <Product>Tasky</Product>
     <Description>A floating dock for Windows 11</Description>
     <Copyright>Dharun Vaibhav U</Copyright>
@@ -19,6 +21,8 @@
 
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
+    <Resource Include="Assets\Tasky.ico" />
+    <Resource Include="Assets\Tasky.png" />
   </ItemGroup>
 
   <!-- `dotnet publish` makes a single Tasky.exe (it still needs the .NET 10 Desktop Runtime).
