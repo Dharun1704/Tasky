@@ -187,6 +187,10 @@ public partial class MainWindow : Window
         {
             Dispatcher.InvokeAsync(ApplyThemeSetting); // Windows switched between light and dark
         }
+        else if (m == WM_DWMCOLORIZATIONCOLORCHANGED)
+        {
+            Dispatcher.InvokeAsync(() => { App.UpdateAccent(); settingsWindow?.ApplyTheme(); }); // a new accent colour
+        }
         else if (m == Native.WM_DISPLAYCHANGE || m == Native.WM_DPICHANGED ||
                  (m == Native.WM_SETTINGCHANGE && (int)wParam == Native.SPI_SETWORKAREA && !settings.ReserveSpace))
         {
@@ -252,6 +256,7 @@ public partial class MainWindow : Window
     /// </summary>
     void OnWindowShown(IntPtr window)
     {
+        if (cleanedUp) return;
         var cls = Native.GetClass(window);
         if (cls == "Windows.UI.Core.CoreWindow")
         {
@@ -265,6 +270,7 @@ public partial class MainWindow : Window
 
     void ApplyTaskbar()
     {
+        if (cleanedUp) return; // exiting: the taskbar has been put back
         if (settings.HideTaskbar)
         {
             if (!settings.TaskbarHiddenByUs)
@@ -275,7 +281,7 @@ public partial class MainWindow : Window
             }
             WindowsTaskbar.IsAutoHide = true;
             WindowsTaskbar.SetVisible(false);
-            WindowsTaskbar.SaveAlwaysShown(); // the taskbar is back at the next sign-in until Tasky starts
+            WindowsTaskbar.SaveAutoHide(false); // the taskbar is back at the next sign-in until Tasky starts
         }
         else if (settings.TaskbarHiddenByUs)
         {
@@ -287,6 +293,7 @@ public partial class MainWindow : Window
     {
         WindowsTaskbar.SetVisible(true);
         WindowsTaskbar.IsAutoHide = settings.TaskbarWasAutoHide;
+        WindowsTaskbar.SaveAutoHide(settings.TaskbarWasAutoHide);
         settings.TaskbarHiddenByUs = false;
         settings.Save();
     }
@@ -301,15 +308,24 @@ public partial class MainWindow : Window
     {
         if (cleanedUp) return;
         cleanedUp = true;
+        // Nothing may hide the taskbar or move Start again from here on, though the process lives a
+        // moment longer: not the timers, and not the TaskbarCreated that stopping the tray sends.
+        tick.Stop();
+        autoHideTimer.Stop();
+        refreshSoon.Stop();
         try
         {
             tray.Stop(); // first, so apps re-add their icons to Explorer's tray
             if (settings.TaskbarHiddenByUs && sessionEnding)
             {
+                // Shown too: Tasky exits now, and if another app then cancels the shutdown the
+                // taskbar must be there.
                 WindowsTaskbar.IsAutoHide = false;
-                WindowsTaskbar.SaveAlwaysShown();
+                WindowsTaskbar.SaveAutoHide(false);
+                WindowsTaskbar.SetVisible(true);
             }
             else if (settings.TaskbarHiddenByUs) RestoreTaskbar();
+            if (!sessionEnding) AlignStartMenu(putBack: true);
             appBar?.Release();
             if (hwnd != IntPtr.Zero) Native.DeregisterShellHookWindow(hwnd);
             if (hwnd != IntPtr.Zero) UnregisterHotKey(hwnd, HotkeyId);

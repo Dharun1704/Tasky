@@ -196,17 +196,19 @@ internal static class WindowsTaskbar
     }
 
     /// <summary>
-    /// Records "always show" as the taskbar's saved setting, which Explorer reads when it starts, without
-    /// changing the running taskbar. After a restart (or a crash or power cut) the taskbar is there
-    /// until Tasky starts and hides it again, rather than auto-hidden with nothing in its place.
+    /// Sets the taskbar's saved auto-hide setting, which Explorer reads when it starts, without changing
+    /// the running taskbar. While Tasky hides the taskbar it saves "always show", so after a restart (or
+    /// a crash or power cut) the taskbar is there until Tasky starts and hides it again, rather than
+    /// auto-hidden with nothing in its place.
     /// </summary>
-    public static void SaveAlwaysShown()
+    public static void SaveAutoHide(bool autoHide)
     {
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3", writable: true);
-            if (key?.GetValue("Settings") is not byte[] data || data.Length <= 8 || (data[8] & Native.ABS_AUTOHIDE) == 0) return;
-            data[8] &= unchecked((byte)~Native.ABS_AUTOHIDE);
+            if (key?.GetValue("Settings") is not byte[] data || data.Length <= 8) return;
+            if (((data[8] & Native.ABS_AUTOHIDE) != 0) == autoHide) return;
+            data[8] = (byte)(autoHide ? data[8] | Native.ABS_AUTOHIDE : data[8] & ~Native.ABS_AUTOHIDE);
             key.SetValue("Settings", data, RegistryValueKind.Binary);
         }
         catch (Exception ex) { Log.Error(ex, "saving the taskbar setting"); }
@@ -254,42 +256,163 @@ internal static class StartMenuShortcut
     }
 }
 
+/// <summary>
+/// Starting Tasky when the user signs in, through a Task Scheduler task with a sign-in trigger rather
+/// than the registry's Run list: Windows deliberately holds Run-list apps back for several seconds
+/// after sign-in, while a sign-in task starts straight away. The Run list is the fallback if the task
+/// can't be made. Neither needs admin rights.
+/// </summary>
 internal static class AutoStart
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    const string TaskName = "Tasky";
 
     /// <summary>
-    /// Points an existing startup entry at this exe when the one it names is gone or is a development
-    /// (bin\Debug) build, e.g. after publishing. A dev build never takes the entry over from a real install.
+    /// At start-up: moves a Run-list entry over to a sign-in task, and points the entry at this exe
+    /// when the one it names is gone or is a development (bin\Debug) build, e.g. after publishing.
+    /// A dev build never takes the entry over from a real install.
     /// </summary>
     public static void Repair()
     {
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
-            if (key?.GetValue("Tasky") is not string registered) return;
+            string? run = RunTarget(), task = run == null ? TaskTarget() : null;
+            string? target = run ?? task;
+            if (target == null) return; // starting with Windows is off
+
             string current = Environment.ProcessPath ?? "";
-            string target = registered.Trim('"');
             bool stale = !System.IO.File.Exists(target) || target.Contains(@"\bin\Debug\", StringComparison.OrdinalIgnoreCase);
             bool currentIsInstall = !current.Contains(@"\bin\", StringComparison.OrdinalIgnoreCase);
-            if (stale && currentIsInstall && !string.Equals(target, current, StringComparison.OrdinalIgnoreCase))
-                key.SetValue("Tasky", $"\"{current}\"");
+            bool repoint = stale && currentIsInstall && !string.Equals(target, current, StringComparison.OrdinalIgnoreCase);
+            string exe = repoint ? current : target;
+
+            if (run != null)
+            {
+                if (CreateTask(exe)) RemoveRunEntry();
+                else if (repoint) SetRunEntry(exe);
+            }
+            else if (repoint) CreateTask(exe);
         }
         catch (Exception ex) { Log.Error(ex, "repairing startup entry"); }
     }
 
     public static bool Enabled
     {
-        get
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            return key?.GetValue("Tasky") != null;
-        }
+        get => RunTarget() != null || TaskTarget() != null;
         set
         {
-            using var key = Registry.CurrentUser.CreateSubKey(RunKey);
-            if (value) key.SetValue("Tasky", $"\"{Environment.ProcessPath}\"");
-            else key.DeleteValue("Tasky", false);
+            string exe = Environment.ProcessPath ?? "";
+            if (value)
+            {
+                if (CreateTask(exe)) RemoveRunEntry();
+                else SetRunEntry(exe);
+            }
+            else
+            {
+                if (TaskTarget() != null) Schtasks("/Delete", "/TN", TaskName, "/F");
+                RemoveRunEntry();
+            }
         }
+    }
+
+    // ---- The sign-in task -----------------------------------------------------------------------
+
+    /// <summary>The exe the sign-in task starts, or null if there's no task.</summary>
+    static string? TaskTarget()
+    {
+        var (exit, xml) = Schtasks("/Query", "/TN", TaskName, "/XML");
+        if (exit != 0) return null;
+        try
+        {
+            var command = System.Xml.Linq.XDocument.Parse(xml).Descendants().FirstOrDefault(e => e.Name.LocalName == "Command");
+            return command?.Value.Trim().Trim('"');
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// A task for this user only, at their sign-in, without admin rights, at normal priority
+    /// (scheduled tasks otherwise run below normal), on battery too, and never stopped for running long.
+    /// </summary>
+    static bool CreateTask(string exe)
+    {
+        string user = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+        static string X(string s) => System.Security.SecurityElement.Escape(s);
+        string xml = $"""
+            <?xml version="1.0" encoding="UTF-16"?>
+            <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+              <RegistrationInfo><Description>Starts the Tasky dock when you sign in.</Description></RegistrationInfo>
+              <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{X(user)}</UserId></LogonTrigger></Triggers>
+              <Principals><Principal id="Author"><UserId>{X(user)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+              <Settings>
+                <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+                <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+                <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+                <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+                <Priority>4</Priority>
+              </Settings>
+              <Actions Context="Author"><Exec><Command>"{X(exe)}"</Command><WorkingDirectory>{X(System.IO.Path.GetDirectoryName(exe) ?? "")}</WorkingDirectory></Exec></Actions>
+            </Task>
+            """;
+        string file = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "tasky-startup-task.xml");
+        try
+        {
+            System.IO.File.WriteAllText(file, xml, System.Text.Encoding.Unicode);
+            var (exit, output) = Schtasks("/Create", "/TN", TaskName, "/XML", file, "/F");
+            if (exit != 0) Log.Error(null, $"creating the sign-in task: {output.Trim()}");
+            return exit == 0;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "creating the sign-in task");
+            return false;
+        }
+        finally
+        {
+            try { System.IO.File.Delete(file); } catch { }
+        }
+    }
+
+    static (int Exit, string Output) Schtasks(params string[] args)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo(System.IO.Path.Combine(Environment.SystemDirectory, "schtasks.exe"))
+            {
+                CreateNoWindow = true, UseShellExecute = false,
+                RedirectStandardOutput = true, RedirectStandardError = true,
+            };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            var error = p.StandardError.ReadToEndAsync();
+            string output = p.StandardOutput.ReadToEnd();
+            p.WaitForExit();
+            return (p.ExitCode, output + error.Result);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "running schtasks");
+            return (-1, "");
+        }
+    }
+
+    // ---- The Run list (fallback, and where older versions put it) ---------------------------------
+
+    static string? RunTarget()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RunKey);
+        return (key?.GetValue("Tasky") as string)?.Trim('"');
+    }
+
+    static void SetRunEntry(string exe)
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(RunKey);
+        key.SetValue("Tasky", $"\"{exe}\"");
+    }
+
+    static void RemoveRunEntry()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
+        key?.DeleteValue("Tasky", false);
     }
 }

@@ -15,8 +15,9 @@ public partial class MainWindow
     {
         DismissPopupsIfNeeded();
         bool hide = false;
-        // Stays up while settings is open, so changes can be seen as they're made.
-        if (!settings.ReserveSpace && settings.AutoHide && !MenuOpen && settingsWindow == null && pillRect.Width > 0)
+        // Stays up while settings is in front, so changes can be seen as they're made (but not for a
+        // settings window left open behind other windows).
+        if (!settings.ReserveSpace && settings.AutoHide && !MenuOpen && settingsWindow is not { IsActive: true } && pillRect.Width > 0)
         {
             Native.GetCursorPos(out var pt);
             var monitor = DockMonitor();
@@ -123,12 +124,14 @@ public partial class MainWindow
     /// <summary>
     /// Windows lays Start out at the bottom of a window that ends just above its own (hidden) 48px
     /// taskbar, so a big or raised dock covers the bottom of it. Lift that window, and the search box
-    /// window laid over it, so Start ends a dock gap above the pill whatever the dock's size.
+    /// window laid over it, so Start ends a dock gap above the pill whatever the dock's size. Windows
+    /// doesn't put Start back by itself, so it's lowered again for a dock on another edge and, with
+    /// <paramref name="putBack"/>, when Tasky exits.
     /// </summary>
-    void AlignStartMenu()
+    void AlignStartMenu(bool putBack = false)
     {
-        if (Edge != DockEdge.Bottom || pillRect.Width <= 0) return;
-        var start = VisibleShellWindow("StartMenuExperienceHost");
+        if (pillRect.Width <= 0) return;
+        var start = ShellWindow("StartMenuExperienceHost", evenCloaked: putBack);
         if (start == IntPtr.Zero || !Native.GetWindowRect(start, out var r)) return;
         var monitor = DockMonitor().rcMonitor;
         if (r.Right <= monitor.Left || r.Left >= monitor.Right) return; // Start is open on another screen
@@ -137,9 +140,9 @@ public partial class MainWindow
         // Windows sometimes resets one but not the other, so each is lifted to its own spot.
         double s = VisualTreeHelper.GetDpi(this).DpiScaleY;
         int taskbar = (int)(48 * s);
-        int lift = Math.Max(0, monitor.Bottom - taskbar - (pillRect.Top - (int)(Gap * s)));
+        int lift = putBack || Edge != DockEdge.Bottom ? 0 : Math.Max(0, monitor.Bottom - taskbar - (pillRect.Top - (int)(Gap * s)));
         MoveBottomTo(start, r, monitor.Bottom - taskbar - lift);
-        var search = VisibleShellWindow("SearchHost");
+        var search = ShellWindow("SearchHost", evenCloaked: false);
         if (search != IntPtr.Zero && Native.GetWindowRect(search, out var sr) && sr.Left < r.Right && sr.Right > r.Left)
             MoveBottomTo(search, sr, monitor.Bottom - lift);
     }
@@ -151,14 +154,14 @@ public partial class MainWindow
                             Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
     }
 
-    /// <summary>The shown (not cloaked) app window of a shell process, such as Start's.</summary>
-    IntPtr VisibleShellWindow(string process)
+    /// <summary>The app window of a shell process, such as Start's: only while shown, unless <paramref name="evenCloaked"/>.</summary>
+    IntPtr ShellWindow(string process, bool evenCloaked)
     {
         for (var h = Native.FindWindowEx(IntPtr.Zero, IntPtr.Zero, "Windows.UI.Core.CoreWindow", null); h != IntPtr.Zero;
              h = Native.FindWindowEx(IntPtr.Zero, h, "Windows.UI.Core.CoreWindow", null))
         {
             if (!Native.IsWindowVisible(h) || ProcessName(h) != process) continue;
-            if (Native.DwmGetWindowAttribute(h, Native.DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0 && cloaked != 0) continue;
+            if (!evenCloaked && Native.DwmGetWindowAttribute(h, Native.DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0 && cloaked != 0) continue;
             return h;
         }
         return IntPtr.Zero;
@@ -276,7 +279,7 @@ public partial class MainWindow
     // ---- Keyboard shortcut: Ctrl+Alt+D shows the dock ----
 
     const int HotkeyId = 0x7A51;
-    const uint MOD_ALT = 0x1, MOD_CONTROL = 0x2, MOD_NOREPEAT = 0x4000, WM_HOTKEY = 0x0312;
+    const uint MOD_ALT = 0x1, MOD_CONTROL = 0x2, MOD_NOREPEAT = 0x4000, WM_HOTKEY = 0x0312, WM_DWMCOLORIZATIONCOLORCHANGED = 0x0320;
     DateTime revealedByHotkeyUntil;
 
     [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr h, int id, uint modifiers, uint vk);

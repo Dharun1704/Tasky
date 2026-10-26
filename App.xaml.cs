@@ -27,7 +27,7 @@ public partial class App : Application
         }
 
         base.OnStartup(e);
-        AutoStart.Repair();
+        Task.Run(AutoStart.Repair); // asks Task Scheduler, so kept off the start-up path
         StartMenuShortcut.Repair();
         ThreadPool.RegisterWaitForSingleObject(showSettings,
             (_, _) => Dispatcher.InvokeAsync(() => dock?.OpenSettings()), null, Timeout.Infinite, executeOnlyOnce: false);
@@ -40,10 +40,16 @@ public partial class App : Application
         };
         SessionEnding += (_, _) => dock?.Cleanup(sessionEnding: true);
 
-        Resources["AccentBrush"] = new SolidColorBrush(ReadAccent());
+        UpdateAccent();
 
         dock = new MainWindow();
-        dock.Closed += (_, _) => dock.Cleanup();
+        // Closed from outside (a WM_CLOSE from some tool): exit too. A process left running without its
+        // dock would keep hiding the taskbar and, holding the single-instance lock, block a restart.
+        dock.Closed += (_, _) =>
+        {
+            dock.Cleanup();
+            Shutdown();
+        };
         MainWindow = dock;
         dock.Show();
         if (e.Args.Contains("--settings", StringComparer.OrdinalIgnoreCase)) dock.OpenSettings();
@@ -54,6 +60,9 @@ public partial class App : Application
         dock?.Cleanup();
         base.OnExit(e);
     }
+
+    /// <summary>Picks up the Windows accent colour, at start-up and whenever it changes.</summary>
+    internal static void UpdateAccent() => Current.Resources["AccentBrush"] = new SolidColorBrush(ReadAccent());
 
     /// <summary>The Windows accent colour, lightened the way dark-mode Windows does.</summary>
     static Color ReadAccent()

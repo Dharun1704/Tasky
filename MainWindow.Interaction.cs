@@ -131,13 +131,15 @@ public partial class MainWindow
             previews.WindowClosed += h =>
             {
                 Native.PostMessage(h, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                var shownFor = previewItem;
                 if (!previews.Remove(h)) HidePreview(); // its card goes at once; the dock catches up as the window closes
-                // An app that asks first ("Save changes?") is still open a moment later: get out of the way of its question.
+                // An app that asks first ("Save changes?") is still open a moment later: get out of the way of
+                // its question (unless the preview has since moved on to another app).
                 var later = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
                 later.Tick += (_, _) =>
                 {
                     later.Stop();
-                    if (Native.IsWindow(h) && Native.IsWindowVisible(h)) HidePreview();
+                    if (previewItem == shownFor && Native.IsWindow(h) && Native.IsWindowVisible(h)) HidePreview();
                 };
                 later.Start();
             };

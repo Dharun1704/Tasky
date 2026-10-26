@@ -67,7 +67,7 @@ public partial class SettingsWindow : Window
     }
 
     /// <summary>The window's colours ("S.*"), following the dock's dark/light theme.</summary>
-    void ApplyTheme()
+    internal void ApplyTheme()
     {
         bool light = Theme.IsLight;
         void Set(string key, uint argb) => Resources[key] = Brush(Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
@@ -259,7 +259,6 @@ public partial class SettingsWindow : Window
                 if (loading) return;
                 settings.Theme = theme;
                 dock.ApplyThemeSetting();
-                ApplyTheme();
                 Changed(look: false);
             };
 

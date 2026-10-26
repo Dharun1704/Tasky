@@ -346,6 +346,7 @@ public partial class MainWindow
         Theme.Apply(settings.Theme);
         ApplyLayout();
         SyncBackdrop();
+        settingsWindow?.ApplyTheme(); // it follows the dock's theme
     }
 
     /// <summary>The display the dock lives on: the one chosen in settings, or the main one if that's gone.</summary>
