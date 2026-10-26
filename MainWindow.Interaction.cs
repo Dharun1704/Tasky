@@ -131,14 +131,13 @@ public partial class MainWindow
             previews.WindowClosed += h =>
             {
                 Native.PostMessage(h, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
-                // Give the app a moment to close, then show what's left (or nothing).
-                var later = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+                if (!previews.Remove(h)) HidePreview(); // its card goes at once; the dock catches up as the window closes
+                // An app that asks first ("Save changes?") is still open a moment later: get out of the way of its question.
+                var later = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
                 later.Tick += (_, _) =>
                 {
                     later.Stop();
-                    Refresh();
-                    if (previewItem is { IsRunning: true } p) ShowPreview(p);
-                    else HidePreview();
+                    if (Native.IsWindow(h) && Native.IsWindowVisible(h)) HidePreview();
                 };
                 later.Start();
             };

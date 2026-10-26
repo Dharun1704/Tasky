@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace Tasky;
 
@@ -17,7 +18,10 @@ internal sealed class PreviewWindow : Window
 
     readonly StackPanel cards = new() { Orientation = Orientation.Horizontal };
     readonly List<(IntPtr Thumb, FrameworkElement Area, IntPtr Source)> thumbs = new();
+    readonly Dictionary<IntPtr, FrameworkElement> cardOf = new();
     IntPtr hwnd;
+    Point anchor;
+    DockEdge edge;
 
     public event Action<IntPtr>? WindowChosen;
     public event Action<IntPtr>? WindowClosed;
@@ -28,8 +32,7 @@ internal sealed class PreviewWindow : Window
         ResizeMode = ResizeMode.NoResize;
         ShowInTaskbar = false;
         ShowActivated = false;
-        Topmost = true;
-        SizeToContent = SizeToContent.WidthAndHeight;
+        Topmost = true; // sized and placed by Place, in one step
         SetResourceReference(BackgroundProperty, "T.PreviewBg");
         FontFamily = (FontFamily)Application.Current.Resources["UiFont"];
         UseLayoutRounding = true;
@@ -67,16 +70,62 @@ internal sealed class PreviewWindow : Window
         if (hwnd == IntPtr.Zero)
         {
             new WindowInteropHelper(this).Owner = owner;
-            Show(); // creates the window so thumbnails have somewhere to draw
+            Show(); // creates the window (off-screen) so thumbnails have somewhere to draw
         }
         ApplyFrame();
 
         foreach (var w in windows) cards.Children.Add(MakeCard(w, icon));
+        this.anchor = anchor;
+        this.edge = edge;
+        Place();
         if (!IsVisible) Show();
+    }
 
-        UpdateLayout();
+    /// <summary>
+    /// Takes a window's card out after its close button was clicked: it fades, then the others close
+    /// up around the icon in one move, with the other thumbnails left running. False when it was the
+    /// last one.
+    /// </summary>
+    public bool Remove(IntPtr window)
+    {
+        if (!cardOf.Remove(window, out var card)) return cardOf.Count > 0;
+        int i = thumbs.FindIndex(t => t.Source == window);
+        var thumb = i >= 0 ? thumbs[i].Thumb : IntPtr.Zero;
+        if (i >= 0) thumbs.RemoveAt(i);
+        if (cardOf.Count == 0)
+        {
+            if (thumb != IntPtr.Zero) DwmUnregisterThumbnail(thumb);
+            return false;
+        }
+
+        // DWM draws the thumbnail over the card, so the two fade together.
+        card.IsHitTestVisible = false;
+        var started = DateTime.UtcNow;
+        var fade = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(15) };
+        fade.Tick += (_, _) =>
+        {
+            double t = Math.Min(1, (DateTime.UtcNow - started).TotalMilliseconds / FadeMs);
+            card.Opacity = 1 - t;
+            if (thumb != IntPtr.Zero) SetOpacity(thumb, (byte)(255 * (1 - t)));
+            if (t < 1) return;
+            fade.Stop();
+            if (thumb != IntPtr.Zero) DwmUnregisterThumbnail(thumb);
+            cards.Children.Remove(card);
+            if (IsVisible) Place();
+        };
+        fade.Start();
+        return true;
+    }
+
+    const double FadeMs = 120;
+
+    /// <summary>Sizes the window to its cards and puts it next to the icon, in a single move.</summary>
+    void Place()
+    {
+        var content = (FrameworkElement)Content;
+        content.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var dpi = VisualTreeHelper.GetDpi(this);
-        double width = ActualWidth * dpi.DpiScaleX, height = ActualHeight * dpi.DpiScaleY;
+        double width = Math.Ceiling(content.DesiredSize.Width * dpi.DpiScaleX), height = Math.Ceiling(content.DesiredSize.Height * dpi.DpiScaleY);
         var mon = Native.MonitorFromPoint(new Native.POINT { X = (int)anchor.X, Y = (int)anchor.Y }, 2 /* NEAREST */);
         var info = new Native.MONITORINFO { cbSize = Marshal.SizeOf<Native.MONITORINFO>() };
         Native.GetMonitorInfo(mon, ref info);
@@ -90,7 +139,8 @@ internal sealed class PreviewWindow : Window
             DockEdge.Right => (anchor.X - width - 10, ClampY(anchor.Y - height / 2)),
             _ => (ClampX(anchor.X - width / 2), anchor.Y - height - 10),
         };
-        Native.SetWindowPos(hwnd, IntPtr.Zero, (int)x, (int)y, 0, 0, Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
+        Native.SetWindowPos(hwnd, IntPtr.Zero, (int)x, (int)y, (int)width, (int)height, Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
+        UpdateLayout();
         PlaceThumbnails();
     }
 
@@ -99,6 +149,12 @@ internal sealed class PreviewWindow : Window
         ClearThumbs();
         cards.Children.Clear();
         if (IsVisible) Hide();
+    }
+
+    void SetOpacity(IntPtr thumb, byte opacity)
+    {
+        var props = new DWM_THUMBNAIL_PROPERTIES { dwFlags = DWM_TNP_OPACITY, opacity = opacity };
+        DwmUpdateThumbnailProperties(thumb, ref props);
     }
 
     FrameworkElement MakeCard(AppWindow w, ImageSource? icon)
@@ -126,9 +182,10 @@ internal sealed class PreviewWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(2, 0, 4, 0),
         };
+        // Like the Windows taskbar's, the close button only shows on the card under the mouse.
         var close = new Border
         {
-            Width = 20, Height = 20, CornerRadius = new CornerRadius(4), Background = Brushes.Transparent,
+            Width = 20, Height = 20, CornerRadius = new CornerRadius(4), Background = Brushes.Transparent, Opacity = 0,
             Child = new TextBlock
             {
                 Text = "\uE711", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 10,
@@ -153,11 +210,20 @@ internal sealed class PreviewWindow : Window
             Child = new StackPanel { Children = { header, area } },
             Cursor = Cursors.Hand,
         };
-        card.MouseEnter += (_, _) => card.SetResourceReference(Border.BackgroundProperty, "T.MenuHover");
-        card.MouseLeave += (_, _) => card.Background = Brushes.Transparent;
+        card.MouseEnter += (_, _) =>
+        {
+            card.SetResourceReference(Border.BackgroundProperty, "T.MenuHover");
+            close.Opacity = 1;
+        };
+        card.MouseLeave += (_, _) =>
+        {
+            card.Background = Brushes.Transparent;
+            close.Opacity = 0;
+        };
         card.MouseLeftButtonUp += (_, _) => WindowChosen?.Invoke(w.Hwnd);
 
         if (usable) thumbs.Add((thumb, area, w.Hwnd));
+        cardOf[w.Hwnd] = card;
         return card;
     }
 
@@ -208,6 +274,7 @@ internal sealed class PreviewWindow : Window
     {
         foreach (var (thumb, _, _) in thumbs) DwmUnregisterThumbnail(thumb);
         thumbs.Clear();
+        cardOf.Clear();
     }
 
     protected override void OnClosed(EventArgs e)

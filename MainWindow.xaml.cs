@@ -275,6 +275,7 @@ public partial class MainWindow : Window
             }
             WindowsTaskbar.IsAutoHide = true;
             WindowsTaskbar.SetVisible(false);
+            WindowsTaskbar.SaveAlwaysShown(); // the taskbar is back at the next sign-in until Tasky starts
         }
         else if (settings.TaskbarHiddenByUs)
         {
@@ -290,15 +291,25 @@ public partial class MainWindow : Window
         settings.Save();
     }
 
-    /// <summary>Puts the Windows taskbar and work area back. Safe to call more than once.</summary>
-    public void Cleanup()
+    /// <summary>
+    /// Puts the Windows taskbar and work area back. Safe to call more than once. When Windows is
+    /// signing out or shutting down, the taskbar is left set to "always show" rather than to the
+    /// user's own setting, so it's there at the next sign-in until Tasky starts; Tasky keeps hiding
+    /// it, and still restores the user's setting when it exits or stops hiding the taskbar.
+    /// </summary>
+    public void Cleanup(bool sessionEnding = false)
     {
         if (cleanedUp) return;
         cleanedUp = true;
         try
         {
             tray.Stop(); // first, so apps re-add their icons to Explorer's tray
-            if (settings.TaskbarHiddenByUs) RestoreTaskbar();
+            if (settings.TaskbarHiddenByUs && sessionEnding)
+            {
+                WindowsTaskbar.IsAutoHide = false;
+                WindowsTaskbar.SaveAlwaysShown();
+            }
+            else if (settings.TaskbarHiddenByUs) RestoreTaskbar();
             appBar?.Release();
             if (hwnd != IntPtr.Zero) Native.DeregisterShellHookWindow(hwnd);
             if (hwnd != IntPtr.Zero) UnregisterHotKey(hwnd, HotkeyId);

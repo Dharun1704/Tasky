@@ -194,6 +194,23 @@ internal static class WindowsTaskbar
         var tray = Tray;
         if (tray != IntPtr.Zero) Native.ShowWindow(tray, visible ? Native.SW_SHOWNA : Native.SW_HIDE);
     }
+
+    /// <summary>
+    /// Records "always show" as the taskbar's saved setting, which Explorer reads when it starts, without
+    /// changing the running taskbar. After a restart (or a crash or power cut) the taskbar is there
+    /// until Tasky starts and hides it again, rather than auto-hidden with nothing in its place.
+    /// </summary>
+    public static void SaveAlwaysShown()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3", writable: true);
+            if (key?.GetValue("Settings") is not byte[] data || data.Length <= 8 || (data[8] & Native.ABS_AUTOHIDE) == 0) return;
+            data[8] &= unchecked((byte)~Native.ABS_AUTOHIDE);
+            key.SetValue("Settings", data, RegistryValueKind.Binary);
+        }
+        catch (Exception ex) { Log.Error(ex, "saving the taskbar setting"); }
+    }
 }
 
 /// <summary>A Tasky shortcut in the Start menu's program list.</summary>

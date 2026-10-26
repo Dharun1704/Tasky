@@ -38,7 +38,7 @@ public partial class App : Application
             Log.Error(a.ExceptionObject as Exception, "fatal");
             dock?.Cleanup();
         };
-        SessionEnding += (_, _) => dock?.Cleanup();
+        SessionEnding += (_, _) => dock?.Cleanup(sessionEnding: true);
 
         Resources["AccentBrush"] = new SolidColorBrush(ReadAccent());
 

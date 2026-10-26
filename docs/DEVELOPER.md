@@ -197,7 +197,7 @@ Tasky is mostly event-driven, which is what keeps its CPU use low.
 - **Magnification:** on mouse move, find the icon under the cursor and the cursor's fraction across it, giving a position in "icon units". Each icon's target scale is `1 + (max - 1) * (1 - cos(pi * t)) / 2`, where `t` falls off linearly over 2.2 icons. `OnFrame` eases each icon's scale toward its target every frame and stops when they've all arrived.
 - **Icons:** `IconLoader.FromPath` gets a 256 px icon from the shell (`IShellItemImageFactory`) once, then makes each displayed size by area-averaging (`Downscale`). It caches sizes in 4 px steps and frees the 256 px original after preloading. Scaling at draw time looked jagged, and asking Windows for odd sizes gave hard-edged icons.
 - **Name label:** placed beside the hovered icon's slot, on the screen-facing side.
-- **Previews:** after a 450 ms hover on a running app, `PreviewWindow` registers a DWM thumbnail per window (`DwmRegisterThumbnail`), including minimized ones, since DWM keeps their last image. Clicking a card switches to the window, and × closes it.
+- **Previews:** after a 450 ms hover on a running app, `PreviewWindow` registers a DWM thumbnail per window (`DwmRegisterThumbnail`), including minimized ones, since DWM keeps their last image. Clicking a card switches to the window. × (shown on the card under the mouse) closes it: the card fades and the rest re-centre in one move (`Remove`, `Place`), and if the app is still open 400 ms later (a "Save changes?" prompt) the preview steps aside.
 - **Dragging:** a press on an icon that moves more than 6 px along the dock becomes a drag. Pinned among pinned reorders the pins; running among running reorders them; a running app dropped among pinned ones gets pinned there.
 - **Clicks:** left-click runs `ActivateOrLaunch`:
   - not running → launch;
@@ -235,8 +235,8 @@ Tasky is mostly event-driven, which is what keeps its CPU use low.
 
 ## The Windows taskbar (`Shell.cs`, `MainWindow.xaml.cs`)
 
-- **Hiding:** `ApplyTaskbar` sets Explorer's taskbar to auto-hide and hides its window. Before the first change it records the taskbar's original state in settings (`TaskbarHiddenByUs`, `TaskbarWasAutoHide`).
-- **Restoring:** `Cleanup` puts the taskbar back and gives the tray back. It runs on Exit, window close, Windows session end and unhandled exceptions, and the next launch repairs things if Tasky was killed.
+- **Hiding:** `ApplyTaskbar` sets Explorer's taskbar to auto-hide and hides its window. Before the first change it records the taskbar's original state in settings (`TaskbarHiddenByUs`, `TaskbarWasAutoHide`). It then saves "always show" as Explorer's stored setting (`SaveAlwaysShown`, the auto-hide bit in `StuckRects3`), which Explorer only reads when it starts. So after a restart, crash or power cut the taskbar is there until Tasky starts.
+- **Restoring:** `Cleanup` puts the taskbar back and gives the tray back. It runs on Exit, window close, Windows session end and unhandled exceptions, and the next launch repairs things if Tasky was killed. At session end the taskbar is left on "always show" instead of the user's own setting, and `TaskbarHiddenByUs` stays set, so it shows at the next sign-in until Tasky starts and hides it again.
 - **Lookup:** `WindowsTaskbar.Tray` finds Explorer's `Shell_TrayWnd` while skipping Tasky's own.
 
 ## Status icons and clock (`MainWindow.Status.cs`, `StatusMonitor.cs`)
