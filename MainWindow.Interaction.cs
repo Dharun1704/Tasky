@@ -62,6 +62,7 @@ public partial class MainWindow
     void OnFrame(object? sender, EventArgs e)
     {
         bool done = true;
+        List<DockItem>? gone = null;
         foreach (var item in items)
         {
             double diff = item.TargetScale - item.Scale;
@@ -71,9 +72,26 @@ public partial class MainWindow
                 item.Scale += diff * (1 - Math.Pow(1 - 0.28, settings.AnimationSpeed)); // 0.28 per frame at 1x
                 done = false;
             }
-            item.Size = Math.Round(BaseSize * item.Scale); // whole pixels keep icons off half-pixel blur
-            UpdateIcon(item);
+
+            // Leaving: shrink away over LeaveTime, easing in and out; back again: grow in.
+            if (item.LeavingSince is { } since)
+            {
+                double t = Math.Min(1, (DateTime.UtcNow - since).TotalMilliseconds / Duration(LeaveTime).TotalMilliseconds);
+                item.Presence = (1 + Math.Cos(Math.PI * t)) / 2;
+                if (t >= 1) (gone ??= new()).Add(item);
+                else done = false;
+            }
+            else if (item.Presence < 1)
+            {
+                item.Presence = Math.Min(1, item.Presence + 0.12 * settings.AnimationSpeed);
+                done = false;
+            }
+
+            item.Size = Math.Round(BaseSize * item.Scale * item.Presence); // whole pixels keep icons off half-pixel blur
+            if (item.Presence >= 1) UpdateIcon(item); // not while shrinking away or growing back: no new bitmaps for passing sizes
         }
+        if (gone != null)
+            foreach (var item in gone) items.Remove(item);
         UpdateLabel();
 
         if (done)
@@ -194,6 +212,7 @@ public partial class MainWindow
     // ---- Drag to reorder pinned apps ----------------------------------------------------------
 
     const double DragThreshold = 6;
+    const double LeaveTime = 220; // ms an icon takes to leave the dock, at 1x animation speed
     DockItem? dragItem;
     Point dragStart;
     bool dragging;

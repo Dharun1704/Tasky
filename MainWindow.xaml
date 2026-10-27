@@ -60,7 +60,7 @@
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="{x:Type local:DockItem}">
                             <!-- Near-transparent fill keeps the whole slot clickable on a layered window -->
-                            <Grid Width="{Binding SlotWidth}" Height="{Binding SlotHeight}"
+                            <Grid x:Name="Slot" Width="{Binding SlotWidth}" Height="{Binding SlotHeight}" Opacity="{Binding Presence}"
                                   HorizontalAlignment="{Binding EdgeH}" VerticalAlignment="{Binding EdgeV}" Background="#01FFFFFF">
                                 <Border x:Name="Hover" Margin="{Binding HoverMargin}" CornerRadius="10" Background="Transparent"/>
                                 <Image Source="{Binding Icon}" Width="{Binding Size}" Height="{Binding Size}"
@@ -85,6 +85,10 @@
                                 <DataTrigger Binding="{Binding IsAttention}" Value="True">
                                     <Setter TargetName="Indicator" Property="Width" Value="16"/>
                                     <Setter TargetName="Indicator" Property="Background" Value="#FFB900"/>
+                                </DataTrigger>
+                                <!-- An icon on its way out can't be clicked -->
+                                <DataTrigger Binding="{Binding IsLeaving}" Value="True">
+                                    <Setter TargetName="Slot" Property="IsHitTestVisible" Value="False"/>
                                 </DataTrigger>
                             </DataTemplate.Triggers>
                         </DataTemplate>

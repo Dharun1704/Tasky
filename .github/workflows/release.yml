@@ -1,0 +1,65 @@
+# Pushing a version tag (for example v1.4.0) builds both release zips on a clean Windows machine
+# and attaches them to that tag's GitHub release, creating the release if there isn't one yet.
+# Its description comes from docs/release-notes/<tag>.md when that file exists; otherwise GitHub
+# writes one from the commits. A release that already exists keeps its text and just gets
+# fresh zips. It can also be run by hand (Actions -> Release -> Run workflow) for an existing tag.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach zips to, e.g. v1.3.0'
+        required: true
+
+permissions:
+  contents: write # to create the release and upload the zips
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Check the tag matches the version in Tasky.csproj
+        shell: pwsh
+        run: |
+          $tagVersion = $env:TAG.TrimStart('v')
+          $projectVersion = @(([xml](Get-Content Tasky.csproj)).Project.PropertyGroup.Version | Where-Object { $_ })[0]
+          if ($tagVersion -ne $projectVersion) {
+            Write-Error "Tag $env:TAG doesn't match <Version>$projectVersion</Version> in Tasky.csproj. Bump the version, commit, and tag that commit."
+            exit 1
+          }
+
+      - name: Build the zips
+        shell: pwsh
+        run: ./scripts/build-release.ps1 -Version $env:TAG.TrimStart('v')
+
+      - name: Create or update the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:TAG.TrimStart('v')
+          $zips = @(Get-ChildItem dist -Filter "Tasky-$version-*.zip" | ForEach-Object FullName)
+          if ($zips.Count -ne 2) { Write-Error "Expected 2 zips, found $($zips.Count)."; exit 1 }
+
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG @zips --clobber
+          } else {
+            $notes = "docs/release-notes/$env:TAG.md"
+            $notesArgs = if (Test-Path $notes) { @('--notes-file', $notes) } else { @('--generate-notes') }
+            gh release create $env:TAG @zips --title "Tasky $version" @notesArgs
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

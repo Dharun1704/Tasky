@@ -69,7 +69,36 @@ internal sealed class DockItem(string key, string launchPath) : INotifyPropertyC
     /// <summary>The screen edge the dock is on; decides which way slots run and icons grow.</summary>
     public static DockEdge Edge { get; set; } = DockEdge.Bottom;
 
-    double Along => Size + Spacing;
+    /// <summary>
+    /// 1 normally; runs down to 0 as the icon leaves the dock (its app closed), shrinking the icon,
+    /// its share of the spacing and its opacity, so the neighbours close up smoothly.
+    /// </summary>
+    public double Presence
+    {
+        get => presence;
+        set
+        {
+            if (!Set(ref presence, value)) return;
+            OnChanged(nameof(SlotWidth));
+            OnChanged(nameof(SlotHeight));
+        }
+    }
+    double presence = 1;
+
+    /// <summary>When the icon started leaving the dock, or null while it's staying.</summary>
+    public DateTime? LeavingSince
+    {
+        get => leavingSince;
+        set
+        {
+            if (!Set(ref leavingSince, value)) return;
+            OnChanged(nameof(IsLeaving));
+        }
+    }
+    DateTime? leavingSince;
+    public bool IsLeaving => leavingSince != null;
+
+    double Along => Size + Spacing * Presence;
     double Across => Size + Inset * 2;
     public double SlotWidth => Edge.IsVertical() ? Across : Along;
     public double SlotHeight => Edge.IsVertical() ? Along : Across;

@@ -154,17 +154,51 @@ public partial class MainWindow
         }, DispatcherPriority.ApplicationIdle);
     }
 
-    /// <summary>Moves/inserts/removes so existing icons keep their visuals and animation state.</summary>
+    /// <summary>
+    /// Moves/inserts so existing icons keep their visuals and animation state. Icons no longer wanted
+    /// aren't removed here: they start leaving (see <see cref="Leave"/>) and keep their place while
+    /// they shrink away, then <see cref="OnFrame"/> removes them.
+    /// </summary>
     void Sync(List<DockItem> desired)
     {
-        for (int i = 0; i < desired.Count; i++)
+        var wanted = new HashSet<DockItem>(desired);
+        foreach (var item in items)
         {
-            if (i < items.Count && ReferenceEquals(items[i], desired[i])) continue;
-            int old = items.IndexOf(desired[i]);
-            if (old >= 0) items.Move(old, i);
-            else items.Insert(i, desired[i]);
+            if (!wanted.Contains(item)) Leave(item);
+            else if (item.IsLeaving) item.LeavingSince = null; // back before it had gone (OnFrame grows it again)
         }
-        while (items.Count > desired.Count) items.RemoveAt(items.Count - 1);
+
+        // The wanted icons in order, with each leaving one kept just after the icon it followed.
+        var target = new List<DockItem>(desired);
+        DockItem? before = null;
+        foreach (var item in items)
+        {
+            if (item.IsLeaving) target.Insert(before == null ? 0 : target.IndexOf(before) + 1, item);
+            before = item;
+        }
+
+        for (int i = 0; i < target.Count; i++)
+        {
+            if (i < items.Count && ReferenceEquals(items[i], target[i])) continue;
+            int old = items.IndexOf(target[i]);
+            if (old >= 0) items.Move(old, i);
+            else
+            {
+                target[i].Presence = 1;
+                items.Insert(i, target[i]);
+            }
+        }
+        while (items.Count > target.Count) items.RemoveAt(items.Count - 1);
+    }
+
+    /// <summary>Starts an icon's exit: it shrinks and fades as its slot closes (see <see cref="OnFrame"/>).</summary>
+    void Leave(DockItem item)
+    {
+        if (item.IsLeaving) return;
+        item.LeavingSince = DateTime.UtcNow;
+        item.TargetScale = 1;
+        if (hovered == item) SetHovered(null);
+        StartAnimating();
     }
 
     void TrackForeground()

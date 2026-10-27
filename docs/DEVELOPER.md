@@ -178,7 +178,7 @@ Tasky is mostly event-driven, which is what keeps its CPU use low.
    - Process path and AUMID are cached per process, and window AUMIDs per window, so a refresh doesn't reopen every process.
 3. **Grouping and order:** pinned apps first, in pin order (`settings.Pins`, matched through `PinKey`); then the permission prompt if there is one; then running apps, in the order they first appeared.
 4. **`GetOrCreate`** returns the existing `DockItem` for a key or creates one, with its name (`DisplayName`: file description, then product name, skipping placeholders like "Electron") and icon.
-5. Each item's window list, running, active and attention state are updated. Then **overflow** splits off apps that don't fit, and **`Sync`** turns the visible list into the minimal moves, inserts and removes on the `ObservableCollection`, so existing icons keep their visuals and animation state.
+5. Each item's window list, running, active and attention state are updated. Then **overflow** splits off apps that don't fit, and **`Sync`** turns the visible list into the minimal moves and inserts on the `ObservableCollection`, so existing icons keep their visuals and animation state. An icon whose app has gone isn't removed at once: `Leave` marks it, it keeps its place, and `OnFrame` runs its `Presence` from 1 to 0 over about 220 ms (the icon, its share of the spacing and its opacity shrink together, so the neighbours close up), then removes it.
 
 **`DockItem`** (`DockItem.cs`) is the view model for one icon: key, launch path, name, icon, windows, flags, and the current size. The XAML template binds to its properties.
 
@@ -328,6 +328,9 @@ Errors go to `%APPDATA%\Tasky\tasky.log`.
 | `app.manifest` | Per-monitor DPI awareness and the Windows 10/11 compatibility ID |
 | `Assets/` | The app icon: `Tasky.ico` (every size, a flat version for 16-24 px), `Tasky.png`, their source images, and `make-icon.ps1`, which rebuilds both from the sources |
 | `Tasky.csproj` | Build settings: WPF, .NET 10, single-file ReadyToRun publish, memory-saving GC settings, ManagedShell |
+| `scripts/build-release.ps1` | Builds the two release zips into `dist` (run by the release workflow) |
+| `.github/workflows/release.yml` | On a version tag: builds the zips on GitHub and creates or updates the release |
+| `docs/release-notes/` | Each release's description, named after its tag |
 
 ---
 
@@ -374,11 +377,29 @@ Errors go to `%APPDATA%\Tasky\tasky.log`.
 
 ## Releasing
 
+Releases are built by GitHub, not on your PC:
+
+1. Bump `<Version>` in `Tasky.csproj` (it appears in Settings → About), and write the release notes in `docs/release-notes/v<version>.md` (copy the previous one).
+2. Commit, then tag that commit and push both:
+   ```bash
+   git tag -a v1.4.0 -m "Tasky 1.4.0"
+   ```
+   ```bash
+   git push origin main v1.4.0
+   ```
+3. The **Release** workflow (`.github/workflows/release.yml`) starts on the tag. On a clean Windows machine it checks the tag matches `<Version>`, runs `scripts/build-release.ps1`, and creates the GitHub release with both zips and the notes file. It takes a few minutes; watch it under the repository's **Actions** tab. If the release already exists, it keeps its text and replaces the zips.
+
+To rebuild the zips for an existing tag, run the workflow by hand: **Actions → Release → Run workflow**, and give the tag.
+
+`scripts/build-release.ps1` also runs locally and puts the zips in `dist\`:
+
 ```bash
-dotnet publish -c Release -o publish
+powershell -ExecutionPolicy Bypass -File scripts\build-release.ps1
 ```
 
-This gives a single `publish\Tasky.exe`, which needs the .NET 10 Desktop Runtime. Bump `<Version>` in `Tasky.csproj`; it appears in Settings → About.
+It builds each zip from an empty `obj\Release`. A framework-dependent build made right after a self-contained one in the same folder reuses its intermediate files and comes out broken, so when building by hand, delete `obj\Release` between the two. The standalone exe is deliberately left uncompressed: a compressed single file unpacks into memory, which doubled Tasky's memory use; the zip compresses it for the download instead.
+
+For a plain local build there's still `dotnet publish -c Release -o publish`, giving a single `publish\Tasky.exe` that needs the .NET 10 Desktop Runtime.
 
 ## Known limitations (and why)
 
