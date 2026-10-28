@@ -12,7 +12,7 @@
     <Product>Tasky</Product>
     <Description>A floating dock for Windows 11</Description>
     <Copyright>Dharun Vaibhav U</Copyright>
-    <Version>1.4.0</Version>
+    <Version>1.5.0</Version>
     <!-- A dock runs all day: keep the memory footprint small. Workstation GC without the background
          GC thread, and the runtime's "conserve memory" mode (compacts more, grows the heap less). -->
     <ServerGarbageCollector>false</ServerGarbageCollector>
