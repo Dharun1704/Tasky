@@ -167,6 +167,7 @@ public partial class SettingsWindow : Window
         ModeReserve.IsChecked = settings.ReserveSpace;
         ModeAutoHide.IsChecked = !settings.ReserveSpace && settings.AutoHide;
         ModeAlways.IsChecked = !settings.ReserveSpace && !settings.AutoHide;
+        ShowSearch.IsChecked = settings.ShowSearch;
         ShowTray.IsChecked = settings.ShowTray;
         HideTaskbar.IsChecked = settings.HideTaskbar;
         AutoStart.IsChecked = Tasky.AutoStart.Enabled;
@@ -264,6 +265,7 @@ public partial class SettingsWindow : Window
 
         Toggle(Magnify, on => settings.Magnify = on, look: true);
         Toggle(Blur, on => settings.Blur = on, look: true);
+        Toggle(ShowSearch, on => { settings.ShowSearch = on; dock.ApplySearchSetting(); });
         Toggle(ShowTray, on => { settings.ShowTray = on; dock.ApplyTraySetting(); });
         Toggle(HideTaskbar, on => { settings.HideTaskbar = on; dock.ApplyTaskbarSetting(); });
         Toggle(AutoStart, on => Tasky.AutoStart.Enabled = on);

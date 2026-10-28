@@ -131,6 +131,12 @@ public partial class MainWindow : Window
         windowEvents.LayoutChanged += () => overlapDirty = true;
         windowEvents.WindowsChanged += ScheduleRefresh;
         windowEvents.WindowShown += OnWindowShown;
+        windowEvents.WindowMoved += window => { if (searchOpen && window == searchWindow) TrackSearch(); };
+        // Search closing, or Start giving way to its search as you type: re-place it straight away.
+        windowEvents.WindowHidden += window =>
+        {
+            if (window == searchWindow || (startSearch || searchOpen) && ProcessName(window) == "StartMenuExperienceHost") TrackSearch();
+        };
         // Network and power changes arrive as events; the status icons only poll the volume.
         System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += (_, _) => Dispatcher.InvokeAsync(() => statusDirty = true);
         System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged += (_, _) => Dispatcher.InvokeAsync(() => statusDirty = true);
@@ -261,6 +267,7 @@ public partial class MainWindow : Window
         if (cls == "Windows.UI.Core.CoreWindow")
         {
             AlignStartMenu();
+            OnSearchShown();
             return;
         }
         if (!settings.HideTaskbar || cls != "Shell_TrayWnd") return;

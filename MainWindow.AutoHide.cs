@@ -50,6 +50,7 @@ public partial class MainWindow
         SetAutoHidden(HideAfterDelay(hide));
         AlignShellFlyout();
         if (IsShellUi(Native.GetForegroundWindow())) AlignStartMenu();
+        if (searchOpen || startSearch || IsShellUi(Native.GetForegroundWindow())) TrackSearch();
     }
 
     static readonly HashSet<string> ShellUiProcesses = new(StringComparer.OrdinalIgnoreCase)
@@ -123,8 +124,8 @@ public partial class MainWindow
 
     /// <summary>
     /// Windows lays Start out at the bottom of a window that ends just above its own (hidden) 48px
-    /// taskbar, so a big or raised dock covers the bottom of it. Lift that window, and the search box
-    /// window laid over it, so Start ends a dock gap above the pill whatever the dock's size. Windows
+    /// taskbar, so a big or raised dock covers the bottom of it. Lift that window, and place the search
+    /// window that takes over when you type, so Start ends a dock gap above the pill whatever the dock's size. Windows
     /// doesn't put Start back by itself, so it's lowered again for a dock on another edge and, with
     /// <paramref name="putBack"/>, when Tasky exits.
     /// </summary>
@@ -136,15 +137,31 @@ public partial class MainWindow
         var monitor = DockMonitor().rcMonitor;
         if (r.Right <= monitor.Left || r.Left >= monitor.Right) return; // Start is open on another screen
 
-        // Windows ends Start's window 48px above the screen bottom and the search box's at the bottom.
-        // Windows sometimes resets one but not the other, so each is lifted to its own spot.
+        // Windows ends Start's window 48px above the screen bottom (its taskbar's height), and Start's
+        // panel 12px above that.
         double s = VisualTreeHelper.GetDpi(this).DpiScaleY;
-        int taskbar = (int)(48 * s);
-        int lift = putBack || Edge != DockEdge.Bottom ? 0 : Math.Max(0, monitor.Bottom - taskbar - (pillRect.Top - (int)(Gap * s)));
-        MoveBottomTo(start, r, monitor.Bottom - taskbar - lift);
+        int bottom = putBack ? monitor.Bottom - (int)(48 * s) : StartPanelBottom() + (int)Math.Round(StartMenuMargin * s);
+        MoveBottomTo(start, r, bottom);
+        // The search window comes up with Start, empty until you type, and then shows the results in
+        // Start's place. Put it there now, so the results don't appear low and then jump.
         var search = ShellWindow("SearchHost", evenCloaked: false);
-        if (search != IntPtr.Zero && Native.GetWindowRect(search, out var sr) && sr.Left < r.Right && sr.Right > r.Left)
-            MoveBottomTo(search, sr, monitor.Bottom - lift);
+        if (search == IntPtr.Zero || !Native.GetWindowRect(search, out var sr)) return;
+        if (searchOpen && !putBack) return; // the dock's search button's, not Start's (see TrackSearch)
+        if (putBack) MoveBottomTo(search, sr, monitor.Bottom);
+        else AlignStartSearch(search);
+    }
+
+    const double StartMenuMargin = 12;
+
+    /// <summary>
+    /// Where Start's panel ends: a dock gap above a bottom dock's pill, but never lower than Windows
+    /// puts it (just above its own taskbar).
+    /// </summary>
+    int StartPanelBottom()
+    {
+        double s = VisualTreeHelper.GetDpi(this).DpiScaleY;
+        int windows = DockMonitor().rcMonitor.Bottom - (int)Math.Round((48 + StartMenuMargin) * s);
+        return Edge == DockEdge.Bottom ? Math.Min(windows, pillRect.Top - (int)Math.Round(Gap * s)) : windows;
     }
 
     static void MoveBottomTo(IntPtr window, Native.RECT r, int bottom)

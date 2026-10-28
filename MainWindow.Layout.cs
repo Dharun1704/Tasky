@@ -42,6 +42,7 @@ public partial class MainWindow
         SetSize(StartButton, button, button);
         StartButton.Margin = edge.Margin(0, 0, 4);
         StartIcon.Margin = new Thickness((button - BaseSize * 0.8) / 2); // app icons carry padding, the logo doesn't
+        LayOutSearch(button);
         // Status capsule: a slightly inset, rounded group holding Quick Settings and the clock. Its text
         // and glyphs keep Windows' taskbar sizes rather than scaling with the app icons, so small
         // icons don't shrink the clock into illegibility and big ones don't make it shout. On a side
@@ -190,7 +191,7 @@ public partial class MainWindow
         DockRow.Orientation = TrayArea.Orientation = StatusRow.Orientation = QuickGlyphs.Orientation = orientation;
         DockRow.Margin = vertical ? new Thickness(0, 8, 0, 8) : new Thickness(8, 0, 8, 0);
         edge.HugEdge(DockRow);
-        foreach (var el in new FrameworkElement[] { StartButton, SepLeft, Apps, OverflowButton, SepRight, TrayArea, StatusCapsule, SettingsButton })
+        foreach (var el in new FrameworkElement[] { StartButton, SearchButton, SepLeft, Apps, OverflowButton, SepRight, TrayArea, StatusCapsule, SettingsButton })
             edge.HugEdge(el);
 
         // The pill is a band of the dock's thickness against the edge, as long as the row of icons.

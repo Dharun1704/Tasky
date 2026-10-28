@@ -436,9 +436,27 @@ public partial class MainWindow
         });
     }
 
-    void OnStartClick(object sender, MouseButtonEventArgs e) => Native.PressKeys(Native.VK_LWIN);
+    void OnStartClick(object sender, MouseButtonEventArgs e) => PressShellKeys(Native.VK_LWIN);
 
-    void OnClockClick(object sender, MouseButtonEventArgs e) => Native.PressKeys(Native.VK_LWIN, Native.VK_N);
+    void OnClockClick(object sender, MouseButtonEventArgs e) => PressShellKeys(Native.VK_LWIN, Native.VK_N);
 
-    void OnQuickSettingsClick(object sender, MouseButtonEventArgs e) => Native.PressKeys(Native.VK_LWIN, Native.VK_A);
+    void OnQuickSettingsClick(object sender, MouseButtonEventArgs e) => PressShellKeys(Native.VK_LWIN, Native.VK_A);
+
+    static readonly bool selfElevated = Native.IsElevated((uint)Environment.ProcessId);
+
+    /// <summary>
+    /// Presses a Windows shortcut (Win, Win+S...) for a dock button. Windows drops key presses that an
+    /// ordinary program makes while an app running as administrator (Task Manager, say) has the focus,
+    /// so in that case the dock takes the focus first, as clicking the real taskbar would.
+    /// </summary>
+    void PressShellKeys(params byte[] keys)
+    {
+        var foreground = Native.GetForegroundWindow();
+        if (!selfElevated && foreground != IntPtr.Zero && foreground != hwnd)
+        {
+            Native.GetWindowThreadProcessId(foreground, out uint pid);
+            if (pid != ownPid && Native.IsElevated(pid)) Native.SetForegroundWindow(hwnd);
+        }
+        Native.PressKeys(keys);
+    }
 }

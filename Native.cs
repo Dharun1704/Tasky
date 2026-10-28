@@ -104,7 +104,7 @@ internal static class Native
     public const int ABS_AUTOHIDE = 1, ABS_ALWAYSONTOP = 2;
     public const int ABN_POSCHANGED = 1;
 
-    public const byte VK_MENU = 0x12, VK_ESCAPE = 0x1B, VK_LWIN = 0x5B, VK_A = 0x41, VK_N = 0x4E;
+    public const byte VK_MENU = 0x12, VK_ESCAPE = 0x1B, VK_LWIN = 0x5B, VK_A = 0x41, VK_N = 0x4E, VK_S = 0x53;
     public const uint KEYEVENTF_KEYUP = 0x2;
 
     public const int SIIGBF_BIGGERSIZEOK = 0x1, SIIGBF_ICONONLY = 0x4;
@@ -328,6 +328,28 @@ internal static class Native
         }
         catch { return null; }
         finally { Marshal.ReleaseComObject(store); }
+    }
+
+    [DllImport("advapi32.dll")] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("advapi32.dll")] static extern bool GetTokenInformation(IntPtr token, int cls, out int info, int length, out int returned);
+    const uint TOKEN_QUERY = 0x0008;
+    const int TokenElevation = 20;
+
+    /// <summary>
+    /// Whether a process runs as administrator. A process Tasky can't look into is counted as one:
+    /// that's what an elevated process looks like from an ordinary one.
+    /// </summary>
+    public static bool IsElevated(uint pid)
+    {
+        var hp = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (hp == IntPtr.Zero) return true;
+        try
+        {
+            if (!OpenProcessToken(hp, TOKEN_QUERY, out var token)) return true;
+            try { return GetTokenInformation(token, TokenElevation, out int elevated, sizeof(int), out _) && elevated != 0; }
+            finally { CloseHandle(token); }
+        }
+        finally { CloseHandle(hp); }
     }
 
     public static void PressKeys(params byte[] keys)

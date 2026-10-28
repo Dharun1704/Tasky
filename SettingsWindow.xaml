@@ -531,6 +531,9 @@
                 <StackPanel x:Name="PageSystem" Visibility="Collapsed">
                     <TextBlock Text="System" Style="{StaticResource PageTitle}"/>
 
+                    <local:SettingRow Icon="&#xE721;" Title="Search button" Description="A magnifier beside Start that opens out into Windows Search.">
+                        <CheckBox x:Name="ShowSearch" Style="{StaticResource ToggleSwitch}"/>
+                    </local:SettingRow>
                     <local:SettingRow Icon="&#xE712;" Title="Tray icons" Description="Show the notification-area icons in the dock.">
                         <CheckBox x:Name="ShowTray" Style="{StaticResource ToggleSwitch}"/>
                     </local:SettingRow>

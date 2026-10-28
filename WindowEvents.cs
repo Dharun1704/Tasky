@@ -31,10 +31,13 @@ internal sealed class WindowEvents : IDisposable
     public event Action? LayoutChanged;
     /// <summary>A top-level window was just shown or uncloaked (Explorer bringing its taskbar back, Start opening).</summary>
     public event Action<IntPtr>? WindowShown;
+    /// <summary>A top-level window was just hidden or cloaked (Windows Search closing).</summary>
+    public event Action<IntPtr>? WindowHidden;
 
     public WindowEvents()
     {
         proc = OnEvent;
+        moveProc = OnMove;
         foreach (var (min, max) in new[]
                  {
                      (EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND),
@@ -56,13 +59,41 @@ internal sealed class WindowEvents : IDisposable
         if (GetAncestor(hwnd, 2 /* GA_ROOT */) != hwnd) return;
 
         if (evt is EVENT_OBJECT_SHOW or EVENT_OBJECT_UNCLOAKED) WindowShown?.Invoke(hwnd);
+        if (evt is EVENT_OBJECT_HIDE or EVENT_OBJECT_CLOAKED) WindowHidden?.Invoke(hwnd);
         LayoutChanged?.Invoke();
         if (evt is EVENT_SYSTEM_MOVESIZEEND) return;
         WindowsChanged?.Invoke();
     }
 
+    const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
+    readonly WinEventProc moveProc;
+    IntPtr moveHook;
+    uint movePid;
+
+    /// <summary>A window of the process passed to <see cref="WatchMoves"/> moved or resized.</summary>
+    public event Action<IntPtr>? WindowMoved;
+
+    /// <summary>
+    /// Reports every move of one process's windows (<see cref="WindowMoved"/>), the moment it happens.
+    /// Too frequent to watch for every window, so it's for one process at a time; 0 stops it.
+    /// </summary>
+    public void WatchMoves(uint pid)
+    {
+        if (pid == movePid) return;
+        if (moveHook != IntPtr.Zero) UnhookWinEvent(moveHook);
+        moveHook = IntPtr.Zero;
+        movePid = pid;
+        if (pid != 0) moveHook = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, IntPtr.Zero, moveProc, pid, 0, WINEVENT_OUTOFCONTEXT);
+    }
+
+    void OnMove(IntPtr hook, uint evt, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
+    {
+        if (hwnd != IntPtr.Zero && idObject == OBJID_WINDOW && idChild == CHILDID_SELF) WindowMoved?.Invoke(hwnd);
+    }
+
     public void Dispose()
     {
+        WatchMoves(0);
         foreach (var h in hooks) UnhookWinEvent(h);
         hooks.Clear();
     }

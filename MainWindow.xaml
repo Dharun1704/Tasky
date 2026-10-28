@@ -45,6 +45,22 @@
                     </Viewbox>
                 </Border>
 
+                <!-- Search: a magnifier that opens out into a search box, which Windows' own search box
+                     is then laid exactly over (see MainWindow.Search.cs) -->
+                <Border x:Name="SearchButton" Style="{StaticResource DockButton}" VerticalAlignment="Bottom" ClipToBounds="True"
+                        MouseLeftButtonUp="OnSearchClick" MouseRightButtonUp="OnDockRightClick">
+                    <Grid x:Name="SearchBox" HorizontalAlignment="Left" VerticalAlignment="Center" ClipToBounds="True">
+                        <Border x:Name="SearchFill" Opacity="0" Background="{DynamicResource T.CapsuleBg}"
+                                BorderBrush="{DynamicResource T.CapsuleStroke}" BorderThickness="1"/>
+                        <StackPanel x:Name="SearchHint" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock x:Name="SearchGlyph" Text="&#xE721;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                       Foreground="{DynamicResource T.Glyph}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="SearchText" Text="Search" Foreground="{DynamicResource T.Sub}" FontSize="14"
+                                       VerticalAlignment="Center" Margin="10,0,0,1"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
                 <Rectangle x:Name="SepLeft" Width="1" Fill="{DynamicResource T.Sep}" VerticalAlignment="Bottom" Margin="6,0"/>
 
                 <!-- Apps -->
@@ -171,8 +187,14 @@
                 <!-- Dock settings -->
                 <Border x:Name="SettingsButton" Style="{StaticResource DockButton}" VerticalAlignment="Bottom"
                         MouseLeftButtonUp="OnSettingsClick" MouseRightButtonUp="OnDockRightClick">
+                    <!-- The gear is drawn centred in its text box, so it turns about its own centre -->
                     <TextBlock x:Name="SettingsGlyph" Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                               Foreground="{DynamicResource T.Glyph}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                               Foreground="{DynamicResource T.Glyph}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                               RenderTransformOrigin="0.5,0.5">
+                        <TextBlock.RenderTransform>
+                            <RotateTransform x:Name="GearTurn"/>
+                        </TextBlock.RenderTransform>
+                    </TextBlock>
                 </Border>
             </StackPanel>
         </Grid>

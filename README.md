@@ -95,10 +95,11 @@ Settings, pins and an error log are kept in `%APPDATA%\Tasky`.
 **The rest of the dock**
 
 - **Start button:** opens the Start menu. The Windows key works too, and brings up a hidden dock.
+- **Search button:** the magnifier beside Start opens Windows Search. On a bottom dock it widens into a search box with the results above it, and what you type appears inside it. Win+S does the same. This needs the Windows search setting at **Search box** (Settings → Personalization → Taskbar → Search). With any other choice, or a dock on another edge, it just opens Windows Search. Turn it off in Tasky's settings under **System**.
 - **Arrow (^):** shows every tray icon. Hover one and click its pin to keep it on the dock; drag pinned tray icons to reorder them. Clicks, right-clicks and double-clicks on tray icons go to the app, just like the Windows tray.
 - **Wi-Fi / volume / battery:** show signal strength, volume or mute, and charge as they change (hover for the details). Click to open Windows Quick Settings right above the dock.
 - **Clock:** opens the notification center and calendar.
-- **Gear:** opens Tasky's settings. Right-clicking empty space on the dock gives a quick menu with the dock modes and **Exit Tasky**.
+- **Gear:** opens Tasky's settings, and closes them when clicked again. Right-clicking empty space on the dock gives a quick menu with the dock modes and **Exit Tasky**.
 
 **Ctrl + Alt + D** shows a hidden dock (it can be turned off in settings). Launching `Tasky.exe` while it's already running opens its settings.
 

@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 
 namespace Tasky;
 
@@ -93,10 +94,30 @@ public partial class MainWindow
 
     SettingsWindow? settingsWindow;
 
+    /// <summary>The gear opens settings and, pressed again, closes them.</summary>
     void OnSettingsClick(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
-        OpenSettings();
+        if (settingsWindow != null)
+        {
+            settingsWindow.Close(); // turns the gear back (Closed)
+            return;
+        }
+        TurnGear(open: true); // straight away, though the window waits for Start & co. to close
+        AfterPanelsClose(OpenSettings); // they would stay in front of it
+    }
+
+    bool gearOpen;
+
+    /// <summary>Turns the gear half a turn as settings open, and back the other way as they close.</summary>
+    void TurnGear(bool open)
+    {
+        if (open == gearOpen) return;
+        gearOpen = open;
+        GearTurn.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation(open ? 180 : 0, Duration(500))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut },
+        });
     }
 
     public void OpenSettings()
@@ -104,8 +125,13 @@ public partial class MainWindow
         if (settingsWindow == null)
         {
             settingsWindow = new SettingsWindow(settings, this);
-            settingsWindow.Closed += (_, _) => settingsWindow = null;
+            settingsWindow.Closed += (_, _) =>
+            {
+                settingsWindow = null;
+                TurnGear(open: false);
+            };
             settingsWindow.Show();
+            TurnGear(open: true);
         }
         if (settingsWindow.WindowState == WindowState.Minimized) settingsWindow.WindowState = WindowState.Normal;
         settingsWindow.Activate();

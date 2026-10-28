@@ -25,6 +25,8 @@ internal sealed class Settings
     public bool AutoHide { get; set; } = true;
     public bool HideTaskbar { get; set; }
     public bool ShowTray { get; set; } = true;
+    /// <summary>A search button beside Start that opens Windows Search.</summary>
+    public bool ShowSearch { get; set; } = true;
     /// <summary>Device name of the display the dock lives on (e.g. \\.\DISPLAY2); null means the main display.</summary>
     public string? Monitor { get; set; }
     /// <summary>Screen edge: "Bottom", "Top", "Left" or "Right".</summary>
