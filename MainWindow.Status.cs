@@ -16,7 +16,7 @@ public partial class MainWindow
     // ---- Live status icons ------------------------------------------------------------------
 
     NetworkStatus network = new(NetworkKind.None, 0, "", false);
-    BatteryStatus battery = new(false, 0, false, false);
+    BatteryStatus battery = new(false, 0, false, false, false);
     VolumeStatus volume = new(0, false, false);
     int statusTicks;
     bool statusDirty = true;

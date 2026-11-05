@@ -110,43 +110,10 @@ public partial class MainWindow
         {
             SetSearchOpen(true);
             searchComingUntil = DateTime.UtcNow.AddSeconds(1.5);
-            SettleSearch();
+            // Windows moves the window into its own spot a frame or two after showing it.
+            FollowShellWindow(ShellWindow("SearchHost", evenCloaked: true), () => { if (searchOpen) TrackSearch(); });
         }
         PressShellKeys(Native.VK_LWIN, Native.VK_S);
-    }
-
-    DispatcherTimer? searchSettle;
-    DateTime settleUntil;
-
-    /// <summary>
-    /// Windows moves its search window to its own spot as it opens, a frame or two after showing it.
-    /// For a moment, follow every move of it as it happens, and check every 10 ms rather than every
-    /// 120, so the window is back on the dock's box before Windows' spot is drawn more than a frame.
-    /// </summary>
-    void SettleSearch()
-    {
-        settleUntil = DateTime.UtcNow.AddMilliseconds(700);
-        var search = ShellWindow("SearchHost", evenCloaked: true);
-        if (search != IntPtr.Zero && windowEvents != null)
-        {
-            Native.GetWindowThreadProcessId(search, out uint pid);
-            windowEvents.WatchMoves(pid);
-        }
-        if (searchSettle == null)
-        {
-            searchSettle = new DispatcherTimer(DispatcherPriority.Send) { Interval = TimeSpan.FromMilliseconds(10) };
-            searchSettle.Tick += (_, _) =>
-            {
-                if (DateTime.UtcNow < settleUntil && searchOpen)
-                {
-                    TrackSearch();
-                    return;
-                }
-                searchSettle.Stop();
-                windowEvents?.WatchMoves(0);
-            };
-        }
-        searchSettle.Start();
     }
 
     /// <summary>

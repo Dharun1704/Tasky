@@ -81,7 +81,8 @@ internal static class Native
     public const long WS_EX_TOOLWINDOW = 0x80;
     public const long WS_EX_APPWINDOW = 0x40000;
     public const long WS_EX_NOACTIVATE = 0x08000000;
-    public const uint GW_OWNER = 4;
+    public const long WS_EX_TOPMOST = 0x8;
+    public const uint GW_HWNDPREV = 3, GW_OWNER = 4;
     public const int DWMWA_CLOAKED = 14;
     public const int GCLP_HICON = -14;
     public const int GCLP_HICONSM = -34;
@@ -127,6 +128,8 @@ internal static class Native
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
+    public const uint GA_ROOTOWNER = 3;
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll")] public static extern bool RegisterShellHookWindow(IntPtr h);

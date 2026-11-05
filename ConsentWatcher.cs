@@ -9,35 +9,57 @@ namespace Tasky;
 /// </summary>
 internal static class ConsentWatcher
 {
-    const int SystemProcessInformation = 5;
+    const int SystemProcessInformation = 5, SystemSessionProcessInformation = 53;
     const uint STATUS_INFO_LENGTH_MISMATCH = 0xC0000004;
 
     // x64 SYSTEM_PROCESS_INFORMATION offsets.
     const int NextEntryOffset = 0x00, ImageNameLength = 0x38, ImageNameBuffer = 0x40, UniqueProcessId = 0x50, SessionId = 0x64;
 
+    [StructLayout(LayoutKind.Sequential)]
+    struct SessionQuery { public uint SessionId; public uint Size; public IntPtr Buffer; }
+
     [DllImport("ntdll.dll")] static extern uint NtQuerySystemInformation(int infoClass, IntPtr buffer, int length, out int returned);
+    [DllImport("ntdll.dll")] static extern uint NtQuerySystemInformation(int infoClass, ref SessionQuery query, int length, out int returned);
 
     static IntPtr buffer;
     static int capacity;
+    static bool sessionQuery = true;
     static readonly uint OwnSession = (uint)System.Diagnostics.Process.GetCurrentProcess().SessionId;
 
-    /// <summary>The consent.exe process in this session, if a permission prompt is open; one cheap system call, reusing a buffer.</summary>
+    /// <summary>
+    /// The consent.exe process in this session, if a permission prompt is open: one system call,
+    /// reusing a buffer. It still describes every process in the session and its threads (a few
+    /// hundred KB, about 1.5 ms), so the dock asks only when there's reason to (see OnTick).
+    /// </summary>
     public static uint? Find()
     {
         if (!Environment.Is64BitProcess) return null;
-        for (int attempt = 0; attempt < 3; attempt++)
+        for (int attempt = 0; attempt < 4; attempt++)
         {
-            if (capacity == 0) Grow(512 * 1024);
-            uint status = NtQuerySystemInformation(SystemProcessInformation, buffer, capacity, out int needed);
+            if (capacity == 0) Grow(256 * 1024);
+            uint status = Query(out int needed);
             if (status == STATUS_INFO_LENGTH_MISMATCH)
             {
-                Grow(Math.Max(needed, capacity) + 64 * 1024);
+                Grow(Math.Max(needed, capacity * 2) + 64 * 1024);
                 continue;
             }
             if (status != 0) return null;
             return Scan();
         }
         return null;
+    }
+
+    /// <summary>Only this session's processes (about half the system's, and half Windows' work), if Windows allows.</summary>
+    static uint Query(out int needed)
+    {
+        if (sessionQuery)
+        {
+            var query = new SessionQuery { SessionId = OwnSession, Size = (uint)capacity, Buffer = buffer };
+            uint status = NtQuerySystemInformation(SystemSessionProcessInformation, ref query, Marshal.SizeOf<SessionQuery>(), out needed);
+            if (status is 0 or STATUS_INFO_LENGTH_MISMATCH) return status;
+            sessionQuery = false; // not supported here: ask for every process instead
+        }
+        return NtQuerySystemInformation(SystemProcessInformation, buffer, capacity, out needed);
     }
 
     static uint? Scan()

@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Threading;
 
 namespace Tasky;
 
@@ -81,12 +82,15 @@ public partial class MainWindow
 
     /// <summary>
     /// Windows opens Quick Settings at the right end of its (hidden) taskbar. Move it so it opens
-    /// straight above the dock's wifi/volume button.
+    /// straight above the dock's wifi/volume button. Runs as it's shown (<see cref="OnWindowShown"/>)
+    /// and, for the foreground window, from the auto-hide check.
     /// </summary>
-    void AlignShellFlyout()
+    void AlignShellFlyout(IntPtr? window = null)
     {
-        if (autoHidden || sliding || pillRect.Width <= 0) return;
-        var fg = Native.GetForegroundWindow();
+        // Worked out from where the dock rests, not where it is now, so it doesn't wait for a hidden
+        // dock to slide back in (it comes back for these panels).
+        if (pillRect.Width <= 0) return;
+        var fg = window ?? Native.GetForegroundWindow();
         if (!Native.GetWindowRect(fg, out var r)) return;
         var monitor = DockMonitor().rcMonitor;
         int x, y, height;
@@ -97,7 +101,9 @@ public partial class MainWindow
             // over a bottom dock; on other edges it stays in Windows' own spot (bottom right).
             if (!QuickSettings.IsVisible || Edge != DockEdge.Bottom) return;
             var dpi = VisualTreeHelper.GetDpi(this);
-            double center = QuickSettings.PointToScreen(new Point(0, 0)).X + QuickSettings.ActualWidth * dpi.DpiScaleX / 2;
+            // pillRect sits just inside the pill's 1px border (see SyncBackdrop).
+            double pillLeft = pillRect.Left - Math.Ceiling(dpi.DpiScaleX);
+            double center = pillLeft + (QuickSettings.TranslatePoint(new Point(0, 0), Pill).X + QuickSettings.ActualWidth / 2) * dpi.DpiScaleX;
             x = Math.Clamp((int)(center - r.Width / 2.0), monitor.Left, monitor.Right - r.Width);
 
             // The panel sits at the bottom of a transparent, screen-height window, laid out from the
@@ -153,6 +159,44 @@ public partial class MainWindow
 
     const double StartMenuMargin = 12;
 
+    IntPtr followed;
+    Action? followPlace;
+    DateTime followUntil;
+    DispatcherTimer? followTimer;
+
+    /// <summary>
+    /// Windows moves its panels (search, Quick Settings) into its own spot as they open, a frame or
+    /// two after showing them. For a moment, follow every move of <paramref name="window"/> as it
+    /// happens, and check every 10 ms rather than every 120, so <paramref name="place"/> puts it back
+    /// in Tasky's spot before Windows' spot is drawn more than a frame.
+    /// </summary>
+    void FollowShellWindow(IntPtr window, Action place)
+    {
+        if (window == IntPtr.Zero) return;
+        followed = window;
+        followPlace = place;
+        followUntil = DateTime.UtcNow.AddMilliseconds(700);
+        Native.GetWindowThreadProcessId(window, out uint pid);
+        windowEvents?.WatchMoves(pid);
+        if (followTimer == null)
+        {
+            followTimer = new DispatcherTimer(DispatcherPriority.Send) { Interval = TimeSpan.FromMilliseconds(10) };
+            followTimer.Tick += (_, _) =>
+            {
+                if (DateTime.UtcNow < followUntil)
+                {
+                    followPlace?.Invoke();
+                    return;
+                }
+                followTimer.Stop();
+                followed = IntPtr.Zero;
+                followPlace = null;
+                windowEvents?.WatchMoves(0);
+            };
+        }
+        followTimer.Start();
+    }
+
     /// <summary>
     /// Where Start's panel ends: a dock gap above a bottom dock's pill, but never lower than Windows
     /// puts it (just above its own taskbar).
@@ -191,15 +235,30 @@ public partial class MainWindow
     void KeepOnTop()
     {
         // Not while a menu or the tray popup is open: the dock window would cover the part of it above the pill.
-        if (hiddenForFullscreen || hwnd == IntPtr.Zero || MenuOpen) return;
+        if (hiddenForFullscreen || hwnd == IntPtr.Zero || MenuOpen || !UnderNormalWindow()) return;
         const uint flags = Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE;
         Native.SetWindowPos(backdrop.Handle, Native.HWND_TOPMOST, 0, 0, 0, 0, flags);
         Native.SetWindowPos(hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, flags);
     }
 
     /// <summary>
-    /// Any app window counts, not just the focused one: focus often sits on an invisible shell window
-    /// (after a Quick Settings panel closes, say), which would otherwise keep the dock up over a maximized app.
+    /// A visible window that isn't topmost sits above the dock. Topmost ones above it (context menus,
+    /// tooltips, other always-on-top apps) opened after the dock and are left there, so a right-click
+    /// menu that reaches down over the dock isn't covered by it a second later.
+    /// </summary>
+    bool UnderNormalWindow()
+    {
+        for (var h = Native.GetWindow(backdrop.Handle, Native.GW_HWNDPREV); h != IntPtr.Zero; h = Native.GetWindow(h, Native.GW_HWNDPREV))
+        {
+            if (h == hwnd || !Native.IsWindowVisible(h)) continue;
+            if ((Native.GetWindowLongPtr(h, Native.GWL_EXSTYLE).ToInt64() & Native.WS_EX_TOPMOST) == 0) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// The app in use covers the dock: the focused one, so a maximized window left behind a smaller
+    /// focused one doesn't hide the dock (see <see cref="WindowEnumerator.ActiveAppWindowIntersects"/>).
     /// </summary>
     bool WindowOverlapsDock()
     {
@@ -217,7 +276,7 @@ public partial class MainWindow
         // window moves, opens, closes or changes focus (or for a second, in case an event was missed).
         if (!overlapDirty && area.Equals(overlapArea) && DateTime.UtcNow - overlapAt < TimeSpan.FromSeconds(1))
             return overlapCached;
-        overlapCached = WindowEnumerator.AnyAppWindowIntersects(area, ownPid);
+        overlapCached = WindowEnumerator.ActiveAppWindowIntersects(area, ownPid);
         overlapArea = area;
         overlapAt = DateTime.UtcNow;
         overlapDirty = false;

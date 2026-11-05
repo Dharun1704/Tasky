@@ -131,7 +131,7 @@ public partial class MainWindow : Window
         windowEvents.LayoutChanged += () => overlapDirty = true;
         windowEvents.WindowsChanged += ScheduleRefresh;
         windowEvents.WindowShown += OnWindowShown;
-        windowEvents.WindowMoved += window => { if (searchOpen && window == searchWindow) TrackSearch(); };
+        windowEvents.WindowMoved += window => { if (window == followed) followPlace?.Invoke(); };
         // Search closing, or Start giving way to its search as you type: re-place it straight away.
         windowEvents.WindowHidden += window =>
         {
@@ -165,11 +165,15 @@ public partial class MainWindow : Window
             // the background UAC prompt; remember those so they reach the dock too.
             switch ((int)wParam)
             {
-                case HSHELL_WINDOWCREATED: announced.Add(lParam); break;
+                case HSHELL_WINDOWCREATED:
+                    announced.Add(lParam);
+                    CheckConsent(); // could be a permission prompt waiting in the background
+                    break;
                 case HSHELL_WINDOWDESTROYED: announced.Remove(lParam); break;
                 case Native.HSHELL_FLASH:
                     announced.Add(lParam);
                     pendingAttention.Add(lParam);
+                    CheckConsent();
                     break;
             }
             ScheduleRefresh();
@@ -220,13 +224,11 @@ public partial class MainWindow : Window
     void OnTick()
     {
         ticks++;
-        // A permission prompt opening or closing: checked every second whether or not the dock is visible.
-        var consent = ConsentWatcher.Find();
-        if (consent != consentPid)
-        {
-            consentPid = WindowEnumerator.ConsentPid = consent;
-            Refresh();
-        }
+        // A permission prompt opening or closing, whether or not the dock is visible. Looking for one
+        // means listing the session's processes, so it's every second only while one is open (to
+        // notice it closing). One opening is checked for as Windows announces its window (the shell
+        // hook, in WndProc), and otherwise every 5 seconds in case that announcement never comes.
+        if (consentPid != null || ticks % 5 == 0) CheckConsent();
         bool visible = !autoHidden && !hiddenForFullscreen;
         if (visible)
         {
@@ -234,8 +236,10 @@ public partial class MainWindow : Window
             UpdateStatus();
         }
         if (ticks % 5 == 0) Refresh();
-        // Over a fullscreen app the dock stays away, so the mouse-edge check can idle.
-        autoHideTimer.Interval = TimeSpan.FromMilliseconds(hiddenForFullscreen ? 500 : 120);
+        // Over a fullscreen app the dock stays away, so the mouse-edge check can idle. Set only on a
+        // change: setting a running timer's interval restarts it.
+        var interval = TimeSpan.FromMilliseconds(hiddenForFullscreen ? 500 : 120);
+        if (autoHideTimer.Interval != interval) autoHideTimer.Interval = interval;
 
         // Explorer sometimes brings its taskbar back (e.g. after display changes).
         if (settings.HideTaskbar && WindowsTaskbar.IsVisible) WindowsTaskbar.SetVisible(false);
@@ -252,6 +256,14 @@ public partial class MainWindow : Window
         if (!autoHidden) KeepOnTop();
     }
 
+    void CheckConsent()
+    {
+        var consent = ConsentWatcher.Find();
+        if (consent == consentPid) return;
+        consentPid = WindowEnumerator.ConsentPid = consent;
+        Refresh();
+    }
+
     // ---- Windows taskbar & shutdown ---------------------------------------------------------
 
     /// <summary>
@@ -264,6 +276,13 @@ public partial class MainWindow : Window
     {
         if (cleanedUp) return;
         var cls = Native.GetClass(window);
+        // Quick Settings and the notification center: placed before Windows' own spot is seen.
+        if (cls == "ControlCenterWindow" || (cls == "Windows.UI.Core.CoreWindow" && ProcessName(window) == "ShellExperienceHost"))
+        {
+            AlignShellFlyout(window);
+            FollowShellWindow(window, () => AlignShellFlyout(window));
+            return;
+        }
         if (cls == "Windows.UI.Core.CoreWindow")
         {
             AlignStartMenu();

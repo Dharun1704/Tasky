@@ -7,7 +7,7 @@ internal enum NetworkKind { None, Wifi, Ethernet }
 
 internal sealed record NetworkStatus(NetworkKind Kind, int SignalPercent, string Name, bool Internet);
 internal sealed record VolumeStatus(int Percent, bool Muted, bool HasDevice);
-internal sealed record BatteryStatus(bool Present, int Percent, bool Charging, bool PluggedIn);
+internal sealed record BatteryStatus(bool Present, int Percent, bool Charging, bool PluggedIn, bool Saver);
 
 /// <summary>Reads the state behind the dock's wifi, volume and battery icons.</summary>
 internal static class StatusMonitor
@@ -83,9 +83,11 @@ internal static class StatusMonitor
     {
         try
         {
-            // The default device can change (headphones plugged in), so look it up again now and then.
+            // The default device can change (headphones plugged in), so look it up again now and then,
+            // releasing the old one's COM objects now rather than whenever the GC gets to them.
             if (endpoint == null || DateTime.UtcNow - endpointAt > TimeSpan.FromSeconds(5))
             {
+                Release(ref endpoint);
                 endpoint = DefaultEndpoint();
                 endpointAt = DateTime.UtcNow;
             }
@@ -96,21 +98,32 @@ internal static class StatusMonitor
         }
         catch
         {
-            endpoint = null;
+            Release(ref endpoint);
             return new VolumeStatus(0, false, false);
         }
+    }
+
+    static void Release<T>(ref T? com) where T : class
+    {
+        if (com != null && Marshal.IsComObject(com)) Marshal.ReleaseComObject(com);
+        com = null;
     }
 
     static IAudioEndpointVolume? DefaultEndpoint()
     {
         var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
+        IMMDevice? device = null;
         try
         {
-            if (enumerator.GetDefaultAudioEndpoint(0 /* eRender */, 1 /* eMultimedia */, out var device) != 0) return null;
+            if (enumerator.GetDefaultAudioEndpoint(0 /* eRender */, 1 /* eMultimedia */, out device) != 0) return null;
             var iid = typeof(IAudioEndpointVolume).GUID;
             return device.Activate(ref iid, 1 /* CLSCTX_INPROC_SERVER */, IntPtr.Zero, out var volume) == 0 ? (IAudioEndpointVolume)volume : null;
         }
-        finally { Marshal.ReleaseComObject(enumerator); }
+        finally
+        {
+            Release(ref device);
+            Marshal.ReleaseComObject(enumerator);
+        }
     }
 
     [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
@@ -160,8 +173,9 @@ internal static class StatusMonitor
     public static BatteryStatus Battery()
     {
         if (!GetSystemPowerStatus(out var s) || (s.BatteryFlag & 128) != 0 || s.BatteryFlag == 255 || s.BatteryLifePercent > 100)
-            return new BatteryStatus(false, 0, false, s.ACLineStatus == 1);
-        return new BatteryStatus(true, s.BatteryLifePercent, (s.BatteryFlag & 8) != 0, s.ACLineStatus == 1);
+            return new BatteryStatus(false, 0, false, s.ACLineStatus == 1, false);
+        return new BatteryStatus(true, s.BatteryLifePercent, (s.BatteryFlag & 8) != 0, s.ACLineStatus == 1,
+                                 s.SystemStatusFlag == 1 /* battery saver on */);
     }
 
     // ---- Glyphs (Segoe Fluent Icons) ----------------------------------------------------------
@@ -178,12 +192,22 @@ internal static class StatusMonitor
     public static string VolumeGlyph(VolumeStatus v) =>
         v.Muted || !v.HasDevice ? "\uE74F" : v.Percent switch { 0 => "\uE992", < 34 => "\uE993", < 67 => "\uE994", _ => "\uE995" };
 
+    // Each set runs 0% to 100% in tenths. The fonts' codepoints run in order only part of the way:
+    // the charging 90% and 100% and the battery saver 90% and 100% glyphs were added elsewhere.
+    static readonly char[] BatteryLevels =
+        { '\uE850', '\uE851', '\uE852', '\uE853', '\uE854', '\uE855', '\uE856', '\uE857', '\uE858', '\uE859', '\uE83F' };
+    static readonly char[] ChargingLevels =
+        { '\uE85A', '\uE85B', '\uE85C', '\uE85D', '\uE85E', '\uE85F', '\uE860', '\uE861', '\uE862', '\uE83E', '\uEA93' };
+    static readonly char[] SaverLevels =
+        { '\uE863', '\uE864', '\uE865', '\uE866', '\uE867', '\uE868', '\uE869', '\uE86A', '\uE86B', '\uEA94', '\uEA95' };
+
     public static string BatteryGlyph(BatteryStatus b)
     {
-        int level = (int)Math.Round(b.Percent / 10.0); // 0..10
-        if (b.Charging || (b.PluggedIn && b.Percent < 100))
-            return level >= 10 ? "\uE83E" : ((char)(0xE85A + level)).ToString();
-        return level >= 10 ? "\uE83F" : ((char)(0xE850 + level)).ToString();
+        int level = Math.Clamp((int)Math.Round(b.Percent / 10.0), 0, 10);
+        var set = b.Charging || (b.PluggedIn && b.Percent < 100) ? ChargingLevels
+                : b.Saver ? SaverLevels
+                : BatteryLevels;
+        return set[level].ToString();
     }
 
     public static string Describe(NetworkStatus n, VolumeStatus v, BatteryStatus b)
@@ -195,7 +219,7 @@ internal static class StatusMonitor
             _ => "Not connected",
         };
         string vol = !v.HasDevice ? "No audio device" : v.Muted ? "Volume: muted" : $"Volume: {v.Percent}%";
-        string bat = !b.Present ? "" : $"  ·  Battery: {b.Percent}%{(b.Charging ? ", charging" : b.PluggedIn ? ", plugged in" : "")}";
+        string bat = !b.Present ? "" : $"  ·  Battery: {b.Percent}%{(b.Charging ? ", charging" : b.PluggedIn ? ", plugged in" : b.Saver ? ", battery saver" : "")}";
         return $"{net}  ·  {vol}{bat}";
     }
 }

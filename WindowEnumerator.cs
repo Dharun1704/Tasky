@@ -134,21 +134,33 @@ internal static class WindowEnumerator
         return found;
     }
 
-    /// <summary>Whether any app window (not minimized, on this desktop) has its visible frame inside <paramref name="area"/>.</summary>
-    public static bool AnyAppWindowIntersects(Native.RECT area, uint ownPid)
+    /// <summary>
+    /// Whether the app being used has its visible frame inside <paramref name="area"/>: the focused
+    /// app window, or the one owning the focused dialog. A maximized window behind a smaller focused
+    /// one doesn't count. When focus is on something that isn't an app (the desktop, or an invisible
+    /// shell window left focused after a Windows panel closes), the frontmost app window counts instead.
+    /// </summary>
+    public static bool ActiveAppWindowIntersects(Native.RECT area, uint ownPid)
     {
-        bool found = false;
-        Native.EnumWindows((h, _) =>
+        bool Usable(IntPtr h) => h != IntPtr.Zero && !Native.IsIconic(h) && IsAppWindow(h, ownPid, None);
+
+        var active = Native.GetAncestor(Native.GetForegroundWindow(), Native.GA_ROOTOWNER);
+        if (!Usable(active))
         {
-            if (Native.IsIconic(h) || !IsAppWindow(h, ownPid, None)) return true;
-            // The visible frame, without the invisible resize borders GetWindowRect includes.
-            if (Native.DwmGetWindowAttribute(h, Native.DWMWA_EXTENDED_FRAME_BOUNDS, out Native.RECT r, 16) != 0
-                && !Native.GetWindowRect(h, out r))
-                return true;
-            found = r.Left < area.Right && r.Right > area.Left && r.Top < area.Bottom && r.Bottom > area.Top;
-            return !found;
-        }, IntPtr.Zero);
-        return found;
+            active = IntPtr.Zero;
+            Native.EnumWindows((h, _) => // front to back
+            {
+                if (!Usable(h)) return true;
+                active = h;
+                return false;
+            }, IntPtr.Zero);
+            if (active == IntPtr.Zero) return false;
+        }
+        // The visible frame, without the invisible resize borders GetWindowRect includes.
+        if (Native.DwmGetWindowAttribute(active, Native.DWMWA_EXTENDED_FRAME_BOUNDS, out Native.RECT r, 16) != 0
+            && !Native.GetWindowRect(active, out r))
+            return false;
+        return r.Left < area.Right && r.Right > area.Left && r.Top < area.Bottom && r.Bottom > area.Top;
     }
 
     static readonly HashSet<IntPtr> None = new();
