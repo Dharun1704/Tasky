@@ -97,6 +97,34 @@
             </Setter>
         </Style>
 
+        <!-- The sidebar's actions, under the pages: look like a page, but do something -->
+        <Style x:Key="NavAction" TargetType="Button">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Foreground" Value="{DynamicResource S.Fg}"/>
+            <Setter Property="Margin" Value="0,3,0,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Height="38" CornerRadius="5" Background="Transparent">
+                            <StackPanel Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Text="{TemplateBinding Tag}" FontFamily="{StaticResource Icons}" FontSize="16"
+                                           VerticalAlignment="Center" Margin="0,0,16,0"/>
+                                <ContentPresenter VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource S.NavHover}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.75"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- ===== Setting card ===== -->
         <Style TargetType="local:SettingRow">
             <Setter Property="Focusable" Value="False"/>
@@ -374,6 +402,10 @@
                     <TextBlock Text="Tasky" FontWeight="SemiBold" FontSize="15"/>
                     <TextBlock x:Name="SidebarVersion" FontSize="12" Foreground="{DynamicResource S.Sub}"/>
                 </StackPanel>
+            </StackPanel>
+            <StackPanel DockPanel.Dock="Bottom">
+                <Button Content="Close settings" Tag="&#xE711;" Style="{StaticResource NavAction}" Click="OnCloseClick"/>
+                <Button Content="Exit Tasky" Tag="&#xE7E8;" Style="{StaticResource NavAction}" Click="OnExitClick"/>
             </StackPanel>
             <StackPanel>
                 <RadioButton x:Name="NavAppearance" Content="Appearance" Tag="&#xE771;" Style="{StaticResource NavItem}"/>

@@ -154,6 +154,7 @@ public partial class MainWindow : Window
         catch (Exception error) { Log.Error(error, "startup"); }
         tick.Start();
         autoHideTimer.Start();
+        Dispatcher.InvokeAsync(() => AlignStartMenu(closed: true), DispatcherPriority.ApplicationIdle); // once the dock is laid out
     }
 
     IntPtr WndProc(IntPtr h, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -186,7 +187,7 @@ public partial class MainWindow : Window
         {
             // Explorer restarted: it shows its taskbar again and forgets our app bar.
             appBar?.Forget();
-            Dispatcher.InvokeAsync(() => { ApplyTaskbar(); Reposition(); });
+            Dispatcher.InvokeAsync(() => { ApplyTaskbar(); Reposition(); AlignStartMenu(closed: true); });
         }
         else if (m == WM_HOTKEY && (int)wParam == HotkeyId)
         {
@@ -201,7 +202,11 @@ public partial class MainWindow : Window
         {
             Dispatcher.InvokeAsync(() => { App.UpdateAccent(); settingsWindow?.ApplyTheme(); }); // a new accent colour
         }
-        else if (m == Native.WM_DISPLAYCHANGE || m == Native.WM_DPICHANGED ||
+        else if (m == Native.WM_DISPLAYCHANGE)
+        {
+            Dispatcher.InvokeAsync(OnDisplaysChanged);
+        }
+        else if (m == Native.WM_DPICHANGED ||
                  (m == Native.WM_SETTINGCHANGE && (int)wParam == Native.SPI_SETWORKAREA && !settings.ReserveSpace))
         {
             Dispatcher.InvokeAsync(Reposition);
@@ -289,7 +294,7 @@ public partial class MainWindow : Window
             OnSearchShown();
             return;
         }
-        if (!settings.HideTaskbar || cls != "Shell_TrayWnd") return;
+        if (!settings.HideTaskbar || cls is not ("Shell_TrayWnd" or "Shell_SecondaryTrayWnd")) return;
         Native.GetWindowThreadProcessId(window, out uint pid);
         if (pid != ownPid) WindowsTaskbar.SetVisible(false); // not our own tray window, which has the same class
     }

@@ -107,20 +107,26 @@ public partial class MainWindow
             x = Math.Clamp((int)(center - r.Width / 2.0), monitor.Left, monitor.Right - r.Width);
 
             // The panel sits at the bottom of a transparent, screen-height window, laid out from the
-            // window's top, so shortening the window would crop it. Keep its height (screen minus
-            // Windows' 48px taskbar, restored if an older Tasky shortened it) and end it just above
-            // the dock; only the empty top runs off-screen.
-            height = Math.Max(r.Height, monitor.Height - 48);
-            y = pillRect.Top - (int)(Gap * dpi.DpiScaleY) - height;
+            // window's top, so shortening the window would crop it, and stretching it on a taller
+            // display leaves pages like Win+P's Project list blank. Keep its height (the main display
+            // minus Windows' 48px taskbar, restored if an older Tasky shortened it) and end the panel
+            // a dock gap above the dock, like Start; only the empty top runs off-screen.
+            height = Math.Max(r.Height, MainDisplay().Height - 48);
+            y = pillRect.Top - (int)(Gap * dpi.DpiScaleY) + (int)Math.Round(QuickSettingsMargin * dpi.DpiScaleY) - height;
         }
         else if (Native.GetClass(fg) == "Windows.UI.Core.CoreWindow" && ProcessName(fg) == "ShellExperienceHost")
         {
-            // The notification center doesn't re-lay out when moved or resized, so it's left at its
-            // default spot: a full-height column at the right edge, clear of the centred dock. This
-            // also puts it back if an older Tasky moved or shortened it.
+            // The notification center doesn't re-lay out when moved or resized, and it's laid out for
+            // the main display's height whichever display it's on. So it stays a column of that height
+            // at the right edge, clear of the centred dock, ending at the bottom of the dock's display:
+            // its default spot on the main display. This also puts it back if an older Tasky moved or
+            // shortened it.
+            height = MainDisplay().Height;
+            // A notification popping up is the same kind of window, only short: moved as it is to the
+            // bottom corner, as stretching it leaves the notification floating part-way up the screen.
+            if (r.Height < height - 48) height = r.Height;
             x = monitor.Right - r.Width;
-            y = monitor.Top;
-            height = monitor.Height;
+            y = monitor.Bottom - height;
         }
         else return;
 
@@ -128,33 +134,48 @@ public partial class MainWindow
         Native.SetWindowPos(fg, IntPtr.Zero, x, y, r.Width, height, Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
     }
 
+    const double QuickSettingsMargin = 12; // Windows ends the panel this far above the bottom of its window
+
+    /// <summary>The main display: where Windows opens its panels, and what it lays them out for, wherever they end up.</summary>
+    static Native.RECT MainDisplay()
+    {
+        var main = new Native.MONITORINFO { cbSize = Marshal.SizeOf<Native.MONITORINFO>() };
+        Native.GetMonitorInfo(Native.MonitorFromPoint(new Native.POINT(), Native.MONITOR_DEFAULTTOPRIMARY), ref main);
+        return main.rcMonitor;
+    }
+
     /// <summary>
     /// Windows lays Start out at the bottom of a window that ends just above its own (hidden) 48px
     /// taskbar, so a big or raised dock covers the bottom of it. Lift that window, and place the search
     /// window that takes over when you type, so Start ends a dock gap above the pill whatever the dock's size. Windows
-    /// doesn't put Start back by itself, so it's lowered again for a dock on another edge and, with
-    /// <paramref name="putBack"/>, when Tasky exits.
+    /// opens Start on the main display whichever display the dock is on, so it's also centred on the
+    /// dock's display. Windows doesn't put Start back by itself, so it stays there between opens, and
+    /// it's lowered again for a dock on another edge and, with <paramref name="putBack"/>, returned to
+    /// the main display when Tasky exits. <paramref name="closed"/> places it while it isn't showing.
     /// </summary>
-    void AlignStartMenu(bool putBack = false)
+    void AlignStartMenu(bool putBack = false, bool closed = false)
     {
         if (pillRect.Width <= 0) return;
-        var start = ShellWindow("StartMenuExperienceHost", evenCloaked: putBack);
+        var start = ShellWindow("StartMenuExperienceHost", evenCloaked: putBack || closed);
         if (start == IntPtr.Zero || !Native.GetWindowRect(start, out var r)) return;
-        var monitor = DockMonitor().rcMonitor;
-        if (r.Right <= monitor.Left || r.Left >= monitor.Right) return; // Start is open on another screen
+        var monitor = putBack ? MainDisplay() : DockMonitor().rcMonitor;
 
         // Windows ends Start's window 48px above the screen bottom (its taskbar's height), and Start's
         // panel 12px above that.
         double s = VisualTreeHelper.GetDpi(this).DpiScaleY;
         int bottom = putBack ? monitor.Bottom - (int)(48 * s) : StartPanelBottom() + (int)Math.Round(StartMenuMargin * s);
-        MoveBottomTo(start, r, bottom);
+        MoveTo(start, r, (monitor.Left + monitor.Right - r.Width) / 2, bottom);
         // The search window comes up with Start, empty until you type, and then shows the results in
         // Start's place. Put it there now, so the results don't appear low and then jump.
-        var search = ShellWindow("SearchHost", evenCloaked: false);
+        var search = ShellWindow("SearchHost", evenCloaked: putBack || closed);
         if (search == IntPtr.Zero || !Native.GetWindowRect(search, out var sr)) return;
         if (searchOpen && !putBack) return; // the dock's search button's, not Start's (see TrackSearch)
-        if (putBack) MoveBottomTo(search, sr, monitor.Bottom);
-        else AlignStartSearch(search);
+        if (putBack) MoveTo(search, sr, (monitor.Left + monitor.Right - sr.Width) / 2, monitor.Bottom);
+        else
+        {
+            AlignStartSearch(search);
+            if (!closed) FollowStartSearch(search);
+        }
     }
 
     const double StartMenuMargin = 12;
@@ -208,10 +229,10 @@ public partial class MainWindow
         return Edge == DockEdge.Bottom ? Math.Min(windows, pillRect.Top - (int)Math.Round(Gap * s)) : windows;
     }
 
-    static void MoveBottomTo(IntPtr window, Native.RECT r, int bottom)
+    static void MoveTo(IntPtr window, Native.RECT r, int x, int bottom)
     {
-        if (Math.Abs(r.Bottom - bottom) <= 1) return;
-        Native.SetWindowPos(window, IntPtr.Zero, r.Left, r.Top + bottom - r.Bottom, 0, 0,
+        if (Math.Abs(r.Left - x) <= 1 && Math.Abs(r.Bottom - bottom) <= 1) return;
+        Native.SetWindowPos(window, IntPtr.Zero, x, r.Top + bottom - r.Bottom, 0, 0,
                             Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
     }
 

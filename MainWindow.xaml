@@ -206,7 +206,7 @@
                 <Border.Effect>
                     <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.45"/>
                 </Border.Effect>
-                <StackPanel Width="206">
+                <StackPanel Width="190">
                     <TextBlock Text="Tray icons" Foreground="{DynamicResource T.Sub}" FontSize="12" Margin="6,2,6,6"
                                FontFamily="{StaticResource UiFont}"/>
                     <ItemsControl x:Name="TrayAll">

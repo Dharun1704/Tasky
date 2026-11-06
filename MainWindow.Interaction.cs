@@ -440,7 +440,12 @@ public partial class MainWindow
 
     void OnClockClick(object sender, MouseButtonEventArgs e) => PressShellKeys(Native.VK_LWIN, Native.VK_N);
 
-    void OnQuickSettingsClick(object sender, MouseButtonEventArgs e) => PressShellKeys(Native.VK_LWIN, Native.VK_A);
+    void OnQuickSettingsClick(object sender, MouseButtonEventArgs e)
+    {
+        trayHover = null; // the name label would sit under the panel, until the mouse comes back
+        UpdateLabel();
+        PressShellKeys(Native.VK_LWIN, Native.VK_A);
+    }
 
     static readonly bool selfElevated = Native.IsElevated((uint)Environment.ProcessId);
 

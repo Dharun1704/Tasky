@@ -130,6 +130,7 @@ public partial class MainWindow
                 settingsWindow = null;
                 TurnGear(open: false);
             };
+            CentreSettings();
             settingsWindow.Show();
             TurnGear(open: true);
         }

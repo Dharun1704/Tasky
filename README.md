@@ -25,7 +25,7 @@ A floating dock for Windows 11. It sits at the bottom, top, left or right of the
 **Known limitations**
 
 - **Windows 11 (64-bit) only.** Windows 10 isn't supported: the blur and rounded corners need Windows 11.
-- **One dock, on one display** (choose which in settings). The Windows taskbar is only hidden on the main display.
+- **One dock, on one display** (choose which in settings). The Windows taskbar is hidden on every display, so the others have no taskbar while Tasky runs.
 - **Apps flashing for attention:** this version of Windows doesn't tell Tasky when most apps flash, so the dock doesn't pop up for them. Permission prompts (User Account Control) are detected and do bring it up.
 - **Dock on the top, left or right:** Quick Settings opens in Windows' own spot (bottom right) rather than next to the dock.
 - **Tray icons of apps running as administrator** only respond if Tasky also runs as administrator.

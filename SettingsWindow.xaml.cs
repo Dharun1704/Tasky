@@ -142,6 +142,10 @@ public partial class SettingsWindow : Window
         NavAppearance.IsChecked = true;
     }
 
+    void OnCloseClick(object sender, RoutedEventArgs e) => Close();
+
+    void OnExitClick(object sender, RoutedEventArgs e) => Application.Current.Shutdown();
+
     /// <summary>Picks up changes made from the dock's right-click menu.</summary>
     public void Reload() => LoadValues();
 

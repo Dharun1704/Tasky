@@ -147,7 +147,7 @@ internal sealed class AppBar(uint callbackMessage)
     Native.APPBARDATA Data() => new() { cbSize = Marshal.SizeOf<Native.APPBARDATA>(), hWnd = hwnd };
 }
 
-/// <summary>Controls the real Windows taskbar on the primary monitor.</summary>
+/// <summary>Controls the real Windows taskbar, on every display.</summary>
 internal static class WindowsTaskbar
 {
     /// <summary>
@@ -169,7 +169,15 @@ internal static class WindowsTaskbar
         }
     }
 
-    public static bool IsVisible => Native.IsWindowVisible(Tray);
+    /// <summary>Explorer's taskbars on the other displays, which follow the main one's auto-hide setting.</summary>
+    static IEnumerable<IntPtr> SecondaryTrays()
+    {
+        for (var h = Native.FindWindowEx(IntPtr.Zero, IntPtr.Zero, "Shell_SecondaryTrayWnd", null); h != IntPtr.Zero;
+             h = Native.FindWindowEx(IntPtr.Zero, h, "Shell_SecondaryTrayWnd", null))
+            yield return h;
+    }
+
+    public static bool IsVisible => Native.IsWindowVisible(Tray) || SecondaryTrays().Any(Native.IsWindowVisible);
 
     public static bool IsAutoHide
     {
@@ -191,8 +199,10 @@ internal static class WindowsTaskbar
 
     public static void SetVisible(bool visible)
     {
+        int show = visible ? Native.SW_SHOWNA : Native.SW_HIDE;
         var tray = Tray;
-        if (tray != IntPtr.Zero) Native.ShowWindow(tray, visible ? Native.SW_SHOWNA : Native.SW_HIDE);
+        if (tray != IntPtr.Zero) Native.ShowWindow(tray, show);
+        foreach (var secondary in SecondaryTrays()) Native.ShowWindow(secondary, show);
     }
 
     /// <summary>

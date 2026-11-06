@@ -209,7 +209,7 @@ public partial class MainWindow
             TrayPopup.IsOpen = false;
             return;
         }
-        var offset = ClearOfDock(TrayMore, TrayPopupShadowRoom);
+        var offset = ClearOfDock(TrayMore, 0); // a Popup places its child's box, leaving out the child's margin
         TrayPopup.HorizontalOffset = offset.X;
         TrayPopup.VerticalOffset = offset.Y;
         AfterPanelsClose(() => TrayPopup.IsOpen = true); // Start would stay in front of it

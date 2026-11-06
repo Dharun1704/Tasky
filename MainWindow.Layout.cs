@@ -230,9 +230,8 @@ public partial class MainWindow
         _ => PlacementMode.Top,
     };
 
-    // Transparent room around the visible box of a menu and of the tray popup, for the shadow
-    // (the Margin in their templates).
-    const double MenuShadowRoom = 12, TrayPopupShadowRoom = 10;
+    // Transparent room around the visible box of a menu, for the shadow (the Margin in its template).
+    const double MenuShadowRoom = 12;
     const double MenuGap = 8; // between the pill and a menu
 
     /// <summary>
@@ -367,5 +366,32 @@ public partial class MainWindow
         appBar?.Release(); // the reservation belongs to the old display
         Reposition();
         SyncBackdrop();
+        AlignStartMenu(closed: true);
+        CentreSettings();
+    }
+
+    /// <summary>A display was connected, removed or rearranged: settings lists them, and the dock's may be back.</summary>
+    void OnDisplaysChanged()
+    {
+        Reposition();
+        SyncBackdrop();
+        AlignStartMenu(closed: true);
+        settingsWindow?.Reload();
+    }
+
+    /// <summary>Centres settings on the dock's display, so it opens beside the dock and moves with it.</summary>
+    void CentreSettings()
+    {
+        if (settingsWindow is not { } window) return;
+        var area = DockMonitor().rcWork;
+        var dpi = VisualTreeHelper.GetDpi(this);
+        double width = (window.ActualWidth > 0 ? window.ActualWidth : window.Width) * dpi.DpiScaleX;
+        double height = (window.ActualHeight > 0 ? window.ActualHeight : window.Height) * dpi.DpiScaleY;
+        var state = window.WindowState;
+        window.WindowState = WindowState.Normal; // a maximized window can't be moved
+        window.WindowStartupLocation = WindowStartupLocation.Manual;
+        window.Left = Math.Max(area.Left, area.Left + (area.Width - width) / 2) / dpi.DpiScaleX;
+        window.Top = Math.Max(area.Top, area.Top + (area.Height - height) / 2) / dpi.DpiScaleY;
+        window.WindowState = state;
     }
 }

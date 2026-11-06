@@ -167,6 +167,7 @@ public partial class MainWindow
         if (startSearch)
         {
             AlignStartSearch(search);
+            FollowStartSearch(search);
             return;
         }
         if (justShown && settings.ShowSearch && SearchOpensOut) SetSearchOpen(true);
@@ -217,8 +218,6 @@ public partial class MainWindow
     void AlignSearch(IntPtr search, bool fromStart = false)
     {
         if (pillRect.Width <= 0 || !Native.GetWindowRect(search, out var r)) return;
-        var monitor = DockMonitor().rcMonitor;
-        if (r.Right <= monitor.Left || r.Left >= monitor.Right) return; // open on another screen
         // Taking over from Start, Windows makes the window taller (by its taskbar's height) a frame
         // or two later, which would drop the box below the dock for a moment. Give it the height
         // search had last time straight away, so that resize changes nothing.
@@ -249,11 +248,17 @@ public partial class MainWindow
     {
         if (pillRect.Width <= 0 || !Native.GetWindowRect(search, out var r)) return;
         var monitor = DockMonitor().rcMonitor;
-        if (r.Right <= monitor.Left || r.Left >= monitor.Right) return;
         double s = VisualTreeHelper.GetDpi(this).DpiScaleY;
         int x = (monitor.Left + monitor.Right - r.Width) / 2;
         MoveSearch(search, r, x, StartPanelBottom() + (int)Math.Round(StartSearchMargin * s));
     }
+
+    /// <summary>
+    /// Windows sends the search window back to the main display the moment you start typing. Called
+    /// from the auto-hide check while Start or its search is up, so the following never lapses, and
+    /// the window is put back before the results are seen on the wrong screen.
+    /// </summary>
+    void FollowStartSearch(IntPtr search) => FollowShellWindow(search, () => { if (!searchOpen) AlignStartSearch(search); });
 
     /// <summary>Moves the search window to end at <paramref name="bottom"/>, at the height <paramref name="r"/> gives.</summary>
     static void MoveSearch(IntPtr search, Native.RECT r, int x, int bottom)
