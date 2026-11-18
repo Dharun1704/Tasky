@@ -93,7 +93,7 @@ public partial class MainWindow
         var fg = window ?? Native.GetForegroundWindow();
         if (!Native.GetWindowRect(fg, out var r)) return;
         var monitor = DockMonitor().rcMonitor;
-        int x, y, height;
+        int x, y, height, width = r.Width;
 
         if (Native.GetClass(fg) == "ControlCenterWindow")
         {
@@ -125,14 +125,20 @@ public partial class MainWindow
             // A notification popping up is the same kind of window, only short: moved as it is to the
             // bottom corner, as stretching it leaves the notification floating part-way up the screen.
             if (r.Height < height - 48) height = r.Height;
-            x = monitor.Right - r.Width;
+            // Windows has left the notification center zero pixels wide (seen after a display was
+            // removed) and never widens it again, so it opened with nothing showing. Give it its width.
+            double s = VisualTreeHelper.GetDpi(this).DpiScaleX;
+            if (width < 100 * s) width = (int)Math.Round(NotificationCenterWidth * s);
+            x = monitor.Right - width;
             y = monitor.Bottom - height;
         }
         else return;
 
-        if (Math.Abs(r.Left - x) <= 1 && Math.Abs(r.Top - y) <= 1 && Math.Abs(r.Height - height) <= 1) return;
-        Native.SetWindowPos(fg, IntPtr.Zero, x, y, r.Width, height, Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
+        if (Math.Abs(r.Left - x) <= 1 && Math.Abs(r.Top - y) <= 1 && Math.Abs(r.Height - height) <= 1 && r.Width == width) return;
+        Native.SetWindowPos(fg, IntPtr.Zero, x, y, width, height, Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
     }
+
+    const double NotificationCenterWidth = 360; // Windows' own, in pixels at 100% scaling
 
     const double QuickSettingsMargin = 12; // Windows ends the panel this far above the bottom of its window
 
